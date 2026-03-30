@@ -224,5 +224,3 @@ if st.session_state.resultado_perfil_bombas_indefinido:
             st.error(f"⚠️ ¡ALERTA DE SOBREPRESIÓN! La línea de energía supera el MOP de {res['pn_bar']} Bar.")
         else:
             st.caption(f"🛡️ Presión dentro de los límites de operación para {res['material']} PN{res['pn_bar']}.")
-        grafico = terreno + linea_presion
-        st.altair_chart(grafico, use_container_width=True)
