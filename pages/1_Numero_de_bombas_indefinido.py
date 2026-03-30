@@ -129,10 +129,20 @@ with col4:
 if "resultado_perfil_bombas_indefinido" not in st.session_state:
     st.session_state.resultado_perfil_bombas_indefinido = None
 
-# Botón para ejecutar el cálculo
+# --- Ejecución del Cálculo ---
 if st.button("🚀 Calcular perfil hidráulico") and P_geo_csv:
-    fluido = {'densidad': densidad, 'viscosidad': viscosidad, 'velocidad': velocidad}
-    tuberia = {'diametro': diametro, 'rugosidad': rugosidad}
+    # Usamos la 'velocidad' que ya calculamos reactivamente en la Columna 2
+    fluido = {
+        'densidad': densidad, 
+        'viscosidad': viscosidad, 
+        'velocidad': velocidad
+    }
+    
+    # Usamos el 'diametro' interno y la 'rugosidad' obtenidos del JSON en la Columna 3
+    tuberia = {
+        'diametro': diametro, 
+        'rugosidad': rugosidad
+    }
 
     x_final, h_final, bombas = generar_perfil_con_bombas_automaticas(
         P_geo_csv,
@@ -144,61 +154,75 @@ if st.button("🚀 Calcular perfil hidráulico") and P_geo_csv:
         num_puntos_extra=num_puntos_extra if num_puntos_extra > 0 else None
     )
 
-    # Guardar resultados en session_state
+    # Guardar resultados y metadatos técnicos en session_state
     st.session_state.resultado_perfil_bombas_indefinido = {
         "x_final": x_final,
         "h_final": h_final,
         "bombas": bombas,
-        "archivo": P_geo_csv
+        "archivo": P_geo_csv,
+        "pn_bar": pn_seleccionado,  # Guardamos el PN para el gráfico MOP
+        "material": nombre_mat
     }
 
     st.success(f"✅ Cálculo completado. Se agregaron {len(bombas)} bombas.")
 
-# Mostrar resultados si existen en session_state
+# --- Visualización de Resultados ---
 if st.session_state.resultado_perfil_bombas_indefinido:
-    resultado = st.session_state.resultado_perfil_bombas_indefinido
-    bombas = resultado["bombas"]
+    res = st.session_state.resultado_perfil_bombas_indefinido
+    
+    col_tabla, col_graf = st.columns([1, 2]) # Le damos más ancho al gráfico
 
-    # Crear columnas para tabla y gráfico
-    col1, col2 = st.columns(2)
-
-    # Columna 1: tabla de bombas
-    with col1:
-        st.subheader("📋 Tabla de bombas")
-        if bombas:
-            df_bombas = pd.DataFrame(bombas, index=range(1, len(bombas)+1))
-            df_bombas = df_bombas.rename(columns={"x": "Distancia [m]", "head": "Energía entregada [m]"})
-            st.dataframe(df_bombas)
+    with col_tabla:
+        st.subheader("📋 Detalle de Instalación")
+        if res["bombas"]:
+            df_b = pd.DataFrame(res["bombas"])
+            df_b.columns = ["Distancia [m]", "Head [m]"]
+            st.dataframe(df_b, use_container_width=True)
         else:
-            st.write("No se agregaron bombas.")
+            st.info("El sistema no requirió bombas adicionales.")
 
-    # Columna 2: gráfico
-    with col2:
-        st.subheader("📈 Gráfico del perfil hidráulico")
+    with col_graf:
+        st.subheader(f"📈 Perfil Hidráulico: {res['material']}")
 
-        # Leer perfil geográfico
-        df_csv = pd.read_csv(resultado["archivo"], header=None)
-        df_csv.columns = ["x", "z"]
+        # 1. Preparar Datos del Terreno y MOP
+        df_terr = pd.read_csv(res["archivo"], header=None)
+        df_terr.columns = ["x", "z"]
+        
+        # Calcular MOP (Línea roja de rotura)
+        mca_max = res["pn_bar"] * 10.197
+        df_terr["mop"] = df_terr["z"] + mca_max
 
-        # Terreno
-        terreno = alt.Chart(df_csv).mark_area(
-            color='saddlebrown', opacity=0.4
-        ).encode(
-            x=alt.X('x', axis=alt.Axis(title='Distancia [m]')),
-            y=alt.Y('z', axis=alt.Axis(title='Altura [m]'))
-        ) + alt.Chart(df_csv).mark_line(
-            color='saddlebrown'
-        ).encode(
-            x='x',
-            y='z'
+        # 2. Gráfico de Terreno (Área)
+        terreno = alt.Chart(df_terr).mark_area(color='saddlebrown', opacity=0.3).encode(
+            x='x', y='z'
+        ) + alt.Chart(df_terr).mark_line(color='saddlebrown', size=2).encode(
+            x='x', y='z'
         )
 
-        # Línea de presión
-        df_presion = pd.DataFrame({"x": resultado["x_final"], "Altura": resultado["h_final"]})
-        linea_presion = alt.Chart(df_presion).mark_line(color='deepskyblue').encode(
-            x=alt.X('x', axis=alt.Axis(title='Distancia [m]')),
-            y=alt.Y('Altura', axis=alt.Axis(title='Altura [m]'))
+        # 3. Gráfico MOP (Línea discontinua roja)
+        linea_mop = alt.Chart(df_terr).mark_line(
+            strokeDash=[6, 4], color='red', opacity=0.6
+        ).encode(x='x', y='mop')
+
+        # 4. Línea de Presión (Azul)
+        df_p = pd.DataFrame({"x": res["x_final"], "h": res["h_final"]})
+        linea_p = alt.Chart(df_p).mark_line(color='dodgerblue', size=2.5).encode(
+            x=alt.X('x', title='Distancia Horizontal [m]'),
+            y=alt.Y('h', title='Elevación [msnm]', scale=alt.Scale(zero=False))
         )
 
+        # 5. Combinar y mostrar
+        grafico_final = (terreno + linea_mop + linea_p).properties(height=400)
+        st.altair_chart(grafico_final, use_container_width=True)
+
+        # --- Validación de Seguridad ---
+        # Comprobamos si la presión máxima alcanzada supera el MOP
+        presion_max = max(res["h_final"])
+        cota_en_presion_max = df_terr.loc[(df_terr['x'] - res['x_final'][np.argmax(res['h_final'])]).abs().idxmin(), 'z']
+        
+        if (presion_max - cota_en_presion_max) > mca_max:
+            st.error(f"⚠️ ¡ALERTA DE SOBREPRESIÓN! La línea de energía supera el MOP de {res['pn_bar']} Bar.")
+        else:
+            st.caption(f"🛡️ Presión dentro de los límites de operación para {res['material']} PN{res['pn_bar']}.")
         grafico = terreno + linea_presion
         st.altair_chart(grafico, use_container_width=True)
