@@ -4,11 +4,24 @@ import numpy as np
 import matplotlib.pyplot as plt
 import altair as alt
 import os
+import json
 from src.fluido import generar_perfil_con_bombas_automaticas
 from app.config_streamlit import configurar_app
 
 # Configurar Streamlit
 configurar_app()
+
+# --- Funciones de carga de Materiales ---
+def listar_materiales():
+    archivos = [f for f in os.listdir(PATH_MATERIALES) if f.endswith(".json")]
+    materiales_dict = {}
+    for arc in archivos:
+        with open(os.path.join(PATH_MATERIALES, arc), "r", encoding="utf-8") as f:
+            datos = json.load(f)
+            materiales_dict[datos["material"]] = datos
+    return materiales_dict
+
+materiales_disponibles = listar_materiales()
 
 st.title("📈 Número de bombas indefinido")
 st.write("""
@@ -62,37 +75,48 @@ with col1:
 
 # Columna 3: parámetros de la tubería (La movemos antes o calculamos primero el diámetro)
 with col3:
-    st.subheader("Parámetros de la tubería")
-    # Necesitamos el diámetro para calcular la velocidad
-    diametro = st.number_input("Diámetro [m]", value=0.1, format="%.4f", step=0.01)
-    rugosidad = st.number_input("Rugosidad [m]", value=0.0002, step=0.0001, format="%.4f")
+    st.subheader("Tubería")
+    
+    if materiales_disponibles:
+        # 1. Seleccionar Material
+        nombre_mat = st.selectbox("Material:", list(materiales_disponibles.keys()))
+        info_mat = materiales_disponibles[nombre_mat]
+        modelos = info_mat["modelos_cañerias"]
+        
+        # 2. Seleccionar Diámetro (DN mm) - Eliminando duplicados
+        diametros_unicos = sorted(list(set(m["dn_mm"] for m in modelos)))
+        dn_seleccionado = st.selectbox("DN [mm]:", diametros_unicos)
+        
+        # 3. Seleccionar PN (Presión Nominal) según el diámetro elegido
+        pns_disponibles = sorted([m["pn"] for m in modelos if m["dn_mm"] == dn_seleccionado])
+        pn_seleccionado = st.selectbox("PN [Bar]:", pns_disponibles)
+        
+        # 4. Obtener datos técnicos finales del modelo seleccionado
+        modelo_final = next(m for m in modelos if m["dn_mm"] == dn_seleccionado and m["pn"] == pn_seleccionado)
+        
+        # El diámetro interno es el que se usa para el cálculo hidráulico (convertido a metros)
+        diametro = modelo_final["diametro_interno_mm"] / 1000.0
+        rugosidad = info_mat["rugosidad_m"]
+        
+        st.caption(f"Ø Interno: {modelo_final['diametro_interno_mm']} mm")
+        st.write(f"**Rugosidad:** {rugosidad} m")
+    else:
+        st.error("No hay archivos de materiales en /data/materiales")
+        diametro = 0.1
+        rugosidad = 0.0002
 
 # Columna 2: parámetros del fluido
 with col2:
-    st.subheader("Parámetros del fluido")
-    densidad = st.number_input("Densidad [kg/m³]", value=1000.0, step=10.0)
-    viscosidad = st.number_input("Viscosidad [Pa·s]", value=0.001, step=0.001, format="%.3f")
+    st.subheader("Fluido")
+    densidad = st.number_input("Densidad [kg/m³]", value=1000.0)
+    viscosidad = st.number_input("Viscosidad [Pa·s]", value=0.001, format="%.3f")
+    caudal = st.number_input("Caudal [m³/s]", value=0.015, format="%.4f")
     
-    # Nuevo campo de Caudal
-    caudal = st.number_input("Caudal [m³/s]", value=0.0118, format="%.4f", step=0.001)
+    # Cálculo de velocidad usando el 'diametro' interno obtenido del JSON
+    area = np.pi * (diametro ** 2) / 4
+    velocidad = caudal / area if diametro > 0 else 0.0
     
-    # --- Cálculo Automático de Velocidad ---
-    if diametro > 0:
-        area = np.pi * (diametro ** 2) / 4
-        velocidad_calculada = caudal / area
-    else:
-        velocidad_calculada = 0.0
-
-    # Campo de Velocidad NO editable (disabled=True)
-    st.text_input(
-        "Velocidad calculada [m/s]", 
-        value=f"{velocidad_calculada:.3f}", 
-        disabled=True,
-        help="La velocidad se calcula automáticamente usando el Caudal y el Diámetro."
-    )
-    # Guardamos el valor para el cálculo posterior
-    velocidad = velocidad_calculada
-
+    st.text_input("Velocidad Resultante [m/s]", value=f"{velocidad:.3f}", disabled=True)
 # Columna 4: condiciones iniciales
 with col4:
     st.subheader("Condiciones iniciales")
