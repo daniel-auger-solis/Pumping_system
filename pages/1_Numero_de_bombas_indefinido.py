@@ -11,6 +11,16 @@ from app.config_streamlit import configurar_app
 # Configurar Streamlit
 configurar_app()
 
+# --- Lógica de Rutas para Data ---
+# Obtenemos la raíz del proyecto (un nivel arriba de /pages o /app)
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+PATH_GEOGRAFICO = os.path.join(BASE_DIR, "data", "geografico")
+PATH_MATERIALES = os.path.join(BASE_DIR, "data", "materiales")
+
+# Asegurar que las carpetas existan para evitar errores
+os.makedirs(PATH_GEOGRAFICO, exist_ok=True)
+os.makedirs(PATH_MATERIALES, exist_ok=True)
+
 # --- Funciones de carga de Materiales ---
 def listar_materiales():
     archivos = [f for f in os.listdir(PATH_MATERIALES) if f.endswith(".json")]
@@ -32,16 +42,6 @@ El usuario puede definir la **presión inicial**, la **altura de seguridad** y e
 """)
 
 st.header("Parámetros")
-
-# --- Lógica de Rutas para Data ---
-# Obtenemos la raíz del proyecto (un nivel arriba de /pages o /app)
-BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-PATH_GEOGRAFICO = os.path.join(BASE_DIR, "data", "geografico")
-PATH_MATERIALES = os.path.join(BASE_DIR, "data", "materiales")
-
-# Asegurar que las carpetas existan para evitar errores
-os.makedirs(PATH_GEOGRAFICO, exist_ok=True)
-os.makedirs(PATH_MATERIALES, exist_ok=True)
 
 # Columnas para organizar la entrada de datos
 col1, col2, col3, col4 = st.columns(4, border=True)
