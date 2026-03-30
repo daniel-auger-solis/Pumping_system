@@ -53,18 +53,38 @@ with col1:
             st.success(f"Archivo subido correctamente: {archivo.name}")
 
 
+# Columna 3: parámetros de la tubería (La movemos antes o calculamos primero el diámetro)
+with col3:
+    st.subheader("Parámetros de la tubería")
+    # Necesitamos el diámetro para calcular la velocidad
+    diametro = st.number_input("Diámetro [m]", value=0.1, format="%.4f", step=0.01)
+    rugosidad = st.number_input("Rugosidad [m]", value=0.0002, step=0.0001, format="%.4f")
+
 # Columna 2: parámetros del fluido
 with col2:
     st.subheader("Parámetros del fluido")
     densidad = st.number_input("Densidad [kg/m³]", value=1000.0, step=10.0)
     viscosidad = st.number_input("Viscosidad [Pa·s]", value=0.001, step=0.001, format="%.3f")
-    velocidad = st.number_input("Velocidad [m/s]", value=1.5)
+    
+    # Nuevo campo de Caudal
+    caudal = st.number_input("Caudal [m³/s]", value=0.0118, format="%.4f", step=0.001)
+    
+    # --- Cálculo Automático de Velocidad ---
+    if diametro > 0:
+        area = np.pi * (diametro ** 2) / 4
+        velocidad_calculada = caudal / area
+    else:
+        velocidad_calculada = 0.0
 
-# Columna 3: parámetros de la tubería
-with col3:
-    st.subheader("Parámetros de la tubería")
-    diametro = st.number_input("Diámetro [m]", value=0.1)
-    rugosidad = st.number_input("Rugosidad [m]", value=0.0002, step=0.0001, format="%.4f")
+    # Campo de Velocidad NO editable (disabled=True)
+    st.text_input(
+        "Velocidad calculada [m/s]", 
+        value=f"{velocidad_calculada:.3f}", 
+        disabled=True,
+        help="La velocidad se calcula automáticamente usando el Caudal y el Diámetro."
+    )
+    # Guardamos el valor para el cálculo posterior
+    velocidad = velocidad_calculada
 
 # Columna 4: condiciones iniciales
 with col4:
