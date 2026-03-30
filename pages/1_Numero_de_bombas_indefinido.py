@@ -20,6 +20,16 @@ El usuario puede definir la **presión inicial**, la **altura de seguridad** y e
 
 st.header("Parámetros")
 
+# --- Lógica de Rutas para Data ---
+# Obtenemos la raíz del proyecto (un nivel arriba de /pages o /app)
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+PATH_GEOGRAFICO = os.path.join(BASE_DIR, "data", "geografico")
+PATH_MATERIALES = os.path.join(BASE_DIR, "data", "materiales")
+
+# Asegurar que las carpetas existan para evitar errores
+os.makedirs(PATH_GEOGRAFICO, exist_ok=True)
+os.makedirs(PATH_MATERIALES, exist_ok=True)
+
 # Columnas para organizar la entrada de datos
 col1, col2, col3, col4 = st.columns(4, border=True)
 
@@ -27,7 +37,7 @@ col1, col2, col3, col4 = st.columns(4, border=True)
 with col1:
     st.subheader("Archivo CSV del perfil")
     carpeta_data = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-    archivos_disponibles = [f for f in os.listdir(carpeta_data) if f.endswith(".csv")]
+    archivos_disponibles = [f for f in os.listdir(PATH_GEOGRAFICO) if f.endswith(".csv")]
 
     opcion_origen = st.radio(
         "¿Cómo quieres ingresar el archivo?",
@@ -37,20 +47,17 @@ with col1:
     P_geo_csv = None  # Variable para almacenar la ruta del archivo
 
     if opcion_origen == "📂 Elegir desde carpeta /data":
-        opciones_archivos = ["Selecciona archivo"] + archivos_disponibles
-        archivo_seleccionado = st.selectbox("Selecciona un archivo existente:", opciones_archivos, index=0)
-        if archivo_seleccionado != "Selecciona archivo":
-            P_geo_csv = os.path.join(carpeta_data, archivo_seleccionado)
-            st.success(f"Archivo seleccionado: {archivo_seleccionado}")
+        archivo_sel = st.selectbox("Selecciona perfil:", ["Selecciona"] + archivos_disponibles)
+        if archivo_sel != "Selecciona":
+            P_geo_csv = os.path.join(PATH_GEOGRAFICO, archivo_sel)
 
     else:
-        archivo = st.file_uploader("Sube el archivo CSV del perfil geográfico", type=["csv"])
-        if archivo is not None:
-            temp_path = os.path.join(carpeta_data, archivo.name)
-            with open(temp_path, "wb") as f:
+        archivo = st.file_uploader("Sube el perfil geográfico", type=["csv"])
+        if archivo:
+            P_geo_csv = os.path.join(PATH_GEOGRAFICO, archivo.name)
+            with open(P_geo_csv, "wb") as f:
                 f.write(archivo.getbuffer())
-            P_geo_csv = temp_path
-            st.success(f"Archivo subido correctamente: {archivo.name}")
+            st.success("Cargado en /geografico")
 
 
 # Columna 3: parámetros de la tubería (La movemos antes o calculamos primero el diámetro)
