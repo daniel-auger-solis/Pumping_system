@@ -15,7 +15,7 @@ configurar_app()
 # Obtenemos la raíz del proyecto (un nivel arriba de /pages o /app)
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 PATH_GEOGRAFICO = os.path.join(BASE_DIR, "data", "geografico")
-PATH_MATERIALES = os.path.join(BASE_DIR, "data", "materiales")
+PATH_MATERIALES = os.path.join(BASE_DIR, "data", "material")
 
 # Asegurar que las carpetas existan para evitar errores
 os.makedirs(PATH_GEOGRAFICO, exist_ok=True)
