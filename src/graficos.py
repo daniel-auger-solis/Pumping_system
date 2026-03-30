@@ -5,43 +5,6 @@ import os
 from src.fluido import generar_perfil_presion, generar_perfil_presion_con_bomba_desconocida, \
     generar_perfil_con_bombas_automaticas
 
-def graficar_perfil_con_bombas_automaticas(
-    P_geo_csv,
-    x_final,
-    h_final,
-    bombas,
-    pn_bar=None, # Nuevo parámetro: PN en Bar
-    titulo='Perfil con Bombas Automáticas y MOP'
-):
-    # ... (Lectura de terreno igual que antes)
-    df = pd.read_csv(P_geo_csv, header=None)
-    terreno_x = df[0].to_list()
-    terreno_y = df[1].to_list()
-
-    plt.figure(figsize=(12, 7))
-
-    # 1. Dibujar el MOP (Máxima Presión de Operación)
-    if pn_bar:
-        mca_max = pn_bar * 10.197  # Conversión Bar a metros
-        # El MOP es el terreno + la resistencia de la tubería
-        mop_line = [z + mca_max for z in terreno_y]
-        plt.plot(terreno_x, mop_line, '--', color='red', alpha=0.6, label=f'MOP ({pn_bar} Bar)')
-        # Opcional: Sombrear el área prohibida
-        plt.fill_between(terreno_x, mop_line, max(mop_line)+10, color='red', alpha=0.05)
-
-    # 2. Dibujar terreno y línea de presión
-    plt.plot(terreno_x, terreno_y, '-', color='green', linewidth=2, label='Terreno')
-    plt.plot(x_final, h_final, '-', color='blue', linewidth=1.5, label='Línea de Gradiente Hidráulico')
-
-    # ... (Resto del código de las bombas igual)
-    
-    # 3. Mejora visual: Área de seguridad (Terreno + Altura Seguridad)
-    # Si quieres ver visualmente dónde se activan las bombas
-    plt.ylabel('Elevación [msnm]')
-    plt.legend(loc='upper right')
-    plt.grid(True, linestyle=':', alpha=0.7)
-    plt.show()
-
 def graficar_perfil_con_presion(csv_path, puntos_presion=None, titulo='Perfil de Terreno CSB con Presión'):
     """
     Grafica el perfil del terreno y opcionalmente puntos de presión en la tubería.
@@ -145,6 +108,7 @@ def graficar_perfil_con_bombas_automaticas(
     x_final,
     h_final,
     bombas,
+    pn_bar=None,
     titulo='Perfil con Bombas Automáticas'
 ):
     """
@@ -172,6 +136,15 @@ def graficar_perfil_con_bombas_automaticas(
 
     # Crear figura
     plt.figure(figsize=(10, 6))
+
+    # 1. Dibujar el MOP (Máxima Presión de Operación)
+    if pn_bar:
+        mca_max = pn_bar * 10.197  # Conversión Bar a metros
+        # El MOP es el terreno + la resistencia de la tubería
+        mop_line = [z + mca_max for z in terreno_y]
+        plt.plot(terreno_x, mop_line, '--', color='red', alpha=0.6, label=f'MOP ({pn_bar} Bar)')
+        # Opcional: Sombrear el área prohibida
+        plt.fill_between(terreno_x, mop_line, max(mop_line)+10, color='red', alpha=0.05)
 
     # Dibujar terreno y línea de presión
     plt.plot(terreno_x, terreno_y, '-', color='green', label='Terreno CSB')
