@@ -79,22 +79,32 @@ with col3:
     
     if materiales_disponibles:
         # 1. Seleccionar Material
-        nombre_mat = st.selectbox("Material:", list(materiales_disponibles.keys()))
+        nombres_materiales = list(materiales_disponibles.keys())
+        nombre_mat = st.selectbox("Material:", nombres_materiales)
+        
         info_mat = materiales_disponibles[nombre_mat]
         modelos = info_mat["modelos_cañerias"]
         
-        # 2. Seleccionar Diámetro (DN mm) - Eliminando duplicados
+        # 2. Obtener Diámetros únicos
         diametros_unicos = sorted(list(set(m["dn_mm"] for m in modelos)))
-        dn_seleccionado = st.selectbox("DN [mm]:", diametros_unicos)
+
+        # --- LÓGICA DE SELECCIÓN AUTOMÁTICA ---
+        # Si el material es HDPE PE100 y 140 está en la lista, calculamos su índice
+        indice_default = 0
+        if nombre_mat == "HDPE PE100" and 140 in diametros_unicos:
+            indice_default = diametros_unicos.index(140)
+        
+        # El parámetro 'index' fuerza la posición inicial del selector
+        dn_seleccionado = st.selectbox("DN [mm]:", diametros_unicos, index=indice_default)
+        # ---------------------------------------
         
         # 3. Seleccionar PN (Presión Nominal) según el diámetro elegido
         pns_disponibles = sorted([m["pn"] for m in modelos if m["dn_mm"] == dn_seleccionado])
         pn_seleccionado = st.selectbox("PN [Bar]:", pns_disponibles)
         
-        # 4. Obtener datos técnicos finales del modelo seleccionado
+        # 4. Obtener datos técnicos finales
         modelo_final = next(m for m in modelos if m["dn_mm"] == dn_seleccionado and m["pn"] == pn_seleccionado)
         
-        # El diámetro interno es el que se usa para el cálculo hidráulico (convertido a metros)
         diametro = modelo_final["diametro_interno_mm"] / 1000.0
         rugosidad = info_mat["rugosidad_m"]
         
