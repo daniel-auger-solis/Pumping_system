@@ -137,8 +137,9 @@ with col3:
         rugosidad = info_mat["rugosidad_m"]
 
         if tipo_mat == "schedule":
-            st.caption(f"OD: {modelo_final['od_mm']} mm  |  e: {modelo_final['espesor_mm']} mm")
-        st.caption(f"Ø Interno: {modelo_final['diametro_interno_mm']} mm")
+            st.caption(f"OD: {modelo_final['od_mm']} mm  |  ID: {modelo_final['diametro_interno_mm']} mm  |  e: {modelo_final['espesor_mm']} mm")
+        else:
+            st.caption(f"Ø Interno: {modelo_final['diametro_interno_mm']} mm")
         st.write(f"**Rugosidad:** {rugosidad} m")
     else:
         st.error("No hay archivos de materiales en /data/materiales")
@@ -149,6 +150,7 @@ with col2:
     densidad   = st.number_input("Densidad [kg/m³]", value=1000.0)
     viscosidad = st.number_input("Viscosidad [Pa·s]", value=0.001, format="%.3f")
     caudal     = st.number_input("Caudal [m³/s]", value=0.015, format="%.4f")
+    st.caption(f"≈ {caudal * 3600:.2f} m³/h")
 
     area      = np.pi * (diametro ** 2) / 4
     velocidad = caudal / area if diametro > 0 else 0.0
