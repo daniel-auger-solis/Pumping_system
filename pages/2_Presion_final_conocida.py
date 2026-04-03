@@ -26,8 +26,10 @@ col1, col2, col3, col4 = st.columns(4, border=True)
 # Columna 1: archivo CSV del perfil
 with col1:
     st.subheader("Archivo CSV del perfil")
+    BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+    PATH_GEOGRAFICO = os.path.join(BASE_DIR, "data", "geografico")
     carpeta_data = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-    archivos_disponibles = [f for f in os.listdir(carpeta_data) if f.endswith(".csv")]
+    archivos_disponibles = [f for f in os.listdir(PATH_GEOGRAFICO) if f.lower().endswith(".csv")]
 
     opcion_origen = st.radio(
         "¿Cómo quieres ingresar el archivo?",
@@ -40,7 +42,7 @@ with col1:
         opciones_archivos = ["Selecciona archivo"] + archivos_disponibles
         archivo_seleccionado = st.selectbox("Selecciona un archivo existente:", opciones_archivos, index=0)
         if archivo_seleccionado != "Selecciona archivo":
-            P_geo_csv = os.path.join(carpeta_data, archivo_seleccionado)
+            P_geo_csv = os.path.join(PATH_GEOGRAFICO, archivo_seleccionado)
             st.success(f"Archivo seleccionado: {archivo_seleccionado}")
     else:
         archivo = st.file_uploader("Sube el archivo CSV del perfil geográfico", type=["csv"])
