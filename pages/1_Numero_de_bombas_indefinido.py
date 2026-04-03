@@ -171,50 +171,45 @@ with col4:
     label_btn = f"⚙️ Singularidades ({n_sing})" if n_sing > 0 else "⚙️ Agregar singularidades"
     if st.button(label_btn, use_container_width=True):
         st.session_state.modal_singularidades = True
+        st.rerun()
 
 # ── Modal de singularidades ───────────────────────────────────────────────────
-if st.session_state.modal_singularidades:
-    @st.dialog("⚙️ Singularidades del sistema")
-    def modal_singularidades():
-        st.caption("Ingresá cada singularidad con su posición en el eje X del perfil y su coeficiente K.")
+@st.dialog("⚙️ Singularidades del sistema")
+def abrir_modal_singularidades():
+    st.caption("Ingresá cada singularidad con su posición en el eje X del perfil y su coeficiente K.")
 
-        # Formulario para agregar
-        with st.form("form_singularidad", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            x_sing = c1.number_input("Posición X [m]", min_value=0.0, step=1.0, format="%.1f")
-            k_sing = c2.number_input("Coeficiente K [-]", min_value=0.0, step=0.1, format="%.2f")
-            desc_sing = st.text_input("Descripción (opcional)", placeholder="Ej: Válvula de compuerta")
-            agregar = st.form_submit_button("➕ Agregar", use_container_width=True)
+    with st.form("form_singularidad", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        x_sing    = c1.number_input("Posición X [m]", min_value=0.0, step=1.0, format="%.1f")
+        k_sing    = c2.number_input("Coeficiente K [-]", min_value=0.0, step=0.1, format="%.2f")
+        desc_sing = st.text_input("Descripción (opcional)", placeholder="Ej: Válvula de compuerta")
+        agregar   = st.form_submit_button("➕ Agregar", use_container_width=True)
 
-        if agregar:
-            st.session_state.singularidades.append({
-                "x_m":        x_sing,
-                "k":          k_sing,
-                "descripcion": desc_sing.strip() or "—",
-            })
-            st.rerun()
+    if agregar:
+        st.session_state.singularidades.append({
+            "x_m":         x_sing,
+            "k":           k_sing,
+            "descripcion": desc_sing.strip() or "—",
+        })
+        st.rerun()
 
-        # Listado actual
-        if st.session_state.singularidades:
-            st.divider()
-            st.markdown("**Singularidades cargadas:**")
-            for i, s in enumerate(st.session_state.singularidades):
-                col_info, col_del = st.columns([5, 1])
-                col_info.markdown(
-                    f"**#{i+1}** &nbsp; X = `{s['x_m']} m` &nbsp;|&nbsp; K = `{s['k']}` &nbsp;|&nbsp; {s['descripcion']}"
-                )
-                if col_del.button("🗑️", key=f"del_sing_{i}"):
-                    st.session_state.singularidades.pop(i)
-                    st.rerun()
-        else:
-            st.info("No hay singularidades cargadas.")
-
+    if st.session_state.singularidades:
         st.divider()
-        if st.button("Cerrar", use_container_width=True):
-            st.session_state.modal_singularidades = False
-            st.rerun()
+        st.markdown("**Singularidades cargadas:**")
+        for i, s in enumerate(st.session_state.singularidades):
+            col_info, col_del = st.columns([5, 1])
+            col_info.markdown(
+                f"**#{i+1}** &nbsp; X = `{s['x_m']} m` &nbsp;|&nbsp; K = `{s['k']}` &nbsp;|&nbsp; {s['descripcion']}"
+            )
+            if col_del.button("🗑️", key=f"del_sing_{i}"):
+                st.session_state.singularidades.pop(i)
+                st.rerun()
+    else:
+        st.info("No hay singularidades cargadas.")
 
-    modal_singularidades()
+if st.session_state.modal_singularidades:
+    st.session_state.modal_singularidades = False
+    abrir_modal_singularidades()
 
 # ── Snapshot de parámetros actuales ──────────────────────────────────────────
 params_actuales = {
