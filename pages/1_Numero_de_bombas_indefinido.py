@@ -78,10 +78,11 @@ with col1:
 with col3:
     st.subheader("Tubería")
 
-    # Inicializar variables para evitar errores en col2 y al calcular
     diametro = 0.1
     rugosidad = 0.0002
     pn_seleccionado = None
+    tipo_mat = "pn"
+    nombre_mat = ""
 
     if materiales_disponibles:
         nombres_materiales = list(materiales_disponibles.keys())
@@ -91,7 +92,6 @@ with col3:
         modelos = info_mat["modelos_cañerias"]
         tipo_mat = detectar_tipo_material(modelos)
 
-        # --- Selector de DN (común a ambos tipos) ---
         diametros_unicos = sorted(set(m["dn_mm"] for m in modelos))
 
         indice_default = 0
@@ -100,20 +100,13 @@ with col3:
 
         dn_seleccionado = st.selectbox("DN [mm]:", diametros_unicos, index=indice_default)
 
-        # --- Selector según tipo de material ---
         modelos_dn = [m for m in modelos if m["dn_mm"] == dn_seleccionado]
 
         if tipo_mat == "pn":
-            # Material tipo HDPE: selector de PN
             pns_disponibles = sorted(set(m["pn"] for m in modelos_dn))
             pn_seleccionado = st.selectbox("PN [Bar]:", pns_disponibles)
-            modelo_final = next(
-                m for m in modelos_dn if m["pn"] == pn_seleccionado
-            )
-
+            modelo_final = next(m for m in modelos_dn if m["pn"] == pn_seleccionado)
         else:
-            # Material tipo Acero ANSI: selector de Schedule
-            # Orden lógico de schedules para presentarlos correctamente
             orden_sch = [
                 "Sch 5s", "Sch 10s", "Sch 10", "Sch 20", "Sch 30",
                 "Sch 40s", "STD", "Sch 40", "Sch 60",
@@ -125,16 +118,12 @@ with col3:
                 if any(m["schedule"] == s for m in modelos_dn)
             ]
             schedule_seleccionado = st.selectbox("Schedule:", schedules_disponibles)
-            modelo_final = next(
-                m for m in modelos_dn if m["schedule"] == schedule_seleccionado
-            )
-            pn_seleccionado = None  # No aplica para acero
+            modelo_final = next(m for m in modelos_dn if m["schedule"] == schedule_seleccionado)
+            pn_seleccionado = None
 
-        # --- Datos técnicos finales ---
         diametro = modelo_final["diametro_interno_mm"] / 1000.0
         rugosidad = info_mat["rugosidad_m"]
 
-        # Info adicional según tipo
         if tipo_mat == "schedule":
             st.caption(f"OD: {modelo_final['od_mm']} mm  |  e: {modelo_final['espesor_mm']} mm")
         st.caption(f"Ø Interno: {modelo_final['diametro_interno_mm']} mm")
@@ -142,7 +131,6 @@ with col3:
 
     else:
         st.error("No hay archivos de materiales en /data/materiales")
-        nombre_mat = ""
 
 
 # Columna 2: parámetros del fluido
@@ -167,43 +155,84 @@ with col4:
     num_puntos_extra = st.number_input("Puntos extra (interpolación)", min_value=0, value=0)
 
 
-# Crear clave en session_state si no existe
+# --- Inicializar session_state ---
 if "resultado_perfil_bombas_indefinido" not in st.session_state:
     st.session_state.resultado_perfil_bombas_indefinido = None
+if "params_ultimo_calculo" not in st.session_state:
+    st.session_state.params_ultimo_calculo = None
 
-# --- Ejecución del Cálculo ---
-if st.button("🚀 Calcular perfil hidráulico") and P_geo_csv:
-    fluido = {
-        'densidad': densidad,
-        'viscosidad': viscosidad,
-        'velocidad': velocidad
-    }
-    tuberia = {
-        'diametro': diametro,
-        'rugosidad': rugosidad
-    }
+# --- Snapshot de parámetros actuales (para detectar si cambiaron) ---
+params_actuales = {
+    "archivo": P_geo_csv,
+    "densidad": densidad,
+    "viscosidad": viscosidad,
+    "caudal": caudal,
+    "diametro": diametro,
+    "rugosidad": rugosidad,
+    "presion_inicial_m": presion_inicial_m,
+    "altura_seguridad": altura_seguridad,
+    "head_bomba": head_bomba,
+    "num_puntos_extra": num_puntos_extra,
+}
 
-    x_final, h_final, bombas = generar_perfil_con_bombas_automaticas(
-        P_geo_csv,
-        fluido,
-        tuberia,
-        presion_inicial_m,
-        altura_seguridad,
-        head_bomba,
-        num_puntos_extra=num_puntos_extra if num_puntos_extra > 0 else None
-    )
+# --- Detectar si los parámetros cambiaron respecto al último cálculo ---
+hay_resultado = st.session_state.resultado_perfil_bombas_indefinido is not None
+params_cambiaron = (
+    hay_resultado and
+    st.session_state.params_ultimo_calculo != params_actuales
+)
 
-    st.session_state.resultado_perfil_bombas_indefinido = {
-        "x_final": x_final,
-        "h_final": h_final,
-        "bombas": bombas,
-        "archivo": P_geo_csv,
-        "pn_bar": pn_seleccionado,
-        "material": nombre_mat,
-        "tipo_mat": tipo_mat,
-    }
+# Aviso general bajo los parámetros (antes del botón)
+if params_cambiaron:
+    st.info("🔄 Los parámetros han cambiado. Presiona **Calcular perfil hidráulico** para actualizar los resultados.")
 
-    st.success(f"✅ Cálculo completado. Se agregaron {len(bombas)} bombas.")
+# --- Botón de cálculo ---
+boton_presionado = st.button("🚀 Calcular perfil hidráulico")
+
+if boton_presionado:
+    if not P_geo_csv:
+        st.warning("⚠️ Debes seleccionar o subir un perfil geográfico CSV antes de calcular.")
+    else:
+        fluido = {
+            'densidad': densidad,
+            'viscosidad': viscosidad,
+            'velocidad': velocidad
+        }
+        tuberia = {
+            'diametro': diametro,
+            'rugosidad': rugosidad
+        }
+
+        x_final, h_final, bombas = generar_perfil_con_bombas_automaticas(
+            P_geo_csv,
+            fluido,
+            tuberia,
+            presion_inicial_m,
+            altura_seguridad,
+            head_bomba,
+            num_puntos_extra=num_puntos_extra if num_puntos_extra > 0 else None
+        )
+
+        if len(bombas) > 20:
+            # Limpiar resultado anterior para no mostrar gráfico con datos viejos
+            st.session_state.resultado_perfil_bombas_indefinido = None
+            st.session_state.params_ultimo_calculo = None
+            st.error(
+                f"🚫 El cálculo requiere **{len(bombas)} bombas**, lo que supera el límite permitido de 20. "
+                "Considera aumentar el DN de la tubería, reducir el caudal o incrementar el head de bomba."
+            )
+        else:
+            st.session_state.resultado_perfil_bombas_indefinido = {
+                "x_final": x_final,
+                "h_final": h_final,
+                "bombas": bombas,
+                "archivo": P_geo_csv,
+                "pn_bar": pn_seleccionado,
+                "material": nombre_mat,
+                "tipo_mat": tipo_mat,
+            }
+            st.session_state.params_ultimo_calculo = params_actuales.copy()
+            st.success(f"✅ Cálculo completado. Se agregaron {len(bombas)} bombas.")
 
 
 # --- Visualización de Resultados ---
@@ -224,10 +253,13 @@ if st.session_state.resultado_perfil_bombas_indefinido:
     with col_graf:
         st.subheader(f"📈 Perfil Hidráulico: {res['material']}")
 
+        # Aviso de resultados desactualizados encima del gráfico
+        if params_cambiaron:
+            st.warning("🔄 Estás viendo resultados desactualizados — presiona **Calcular perfil hidráulico** para actualizar.")
+
         df_terr = pd.read_csv(res["archivo"], header=None)
         df_terr.columns = ["x", "z"]
 
-        # Línea MOP: solo aplica si el material tiene PN definido
         tiene_pn = res["tipo_mat"] == "pn" and res["pn_bar"] is not None
 
         terreno = (
@@ -255,7 +287,6 @@ if st.session_state.resultado_perfil_bombas_indefinido:
         grafico_final = alt.layer(*capas).properties(height=400)
         st.altair_chart(grafico_final, use_container_width=True)
 
-        # Validación de sobrepresión (solo para materiales con PN)
         if tiene_pn:
             presion_max = max(res["h_final"])
             idx_max = np.argmax(res["h_final"])
