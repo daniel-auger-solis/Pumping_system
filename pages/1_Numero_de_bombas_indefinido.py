@@ -87,6 +87,13 @@ for key, val in [
     ("singularidades",                     []),
     ("modal_singularidades",               False),
     ("editando_sing_idx",                  None),
+    ("modal_fluido",                       False),
+    ("fluido_es_custom",                   False),
+    ("fluido_nombre_es",                   "Agua"),
+    ("fluido_T",                           25.0),
+    ("fluido_P",                           1.01325),
+    ("fluido_densidad",                    1000.0),
+    ("fluido_viscosidad",                  0.001),
 ]:
     if key not in st.session_state:
         st.session_state[key] = val
@@ -188,39 +195,27 @@ with col3:
 with col2:
     st.subheader("Fluido")
 
-    # --- Checkbox fluido personalizado ---
-    es_custom = st.checkbox("Fluido personalizado")
+    # Leer propiedades del fluido guardadas en session_state
+    es_custom     = st.session_state.fluido_es_custom
+    fluido_sel_es = st.session_state.fluido_nombre_es
+    T_fluido      = st.session_state.fluido_T
+    P_fluido      = st.session_state.fluido_P
+    densidad      = st.session_state.fluido_densidad
+    viscosidad    = st.session_state.fluido_viscosidad
 
-    # --- Selector de fluido (bloqueado si es custom) ---
-    idx_default   = nombres_fluidos_es.index(FLUIDO_DEFAULT) if FLUIDO_DEFAULT in nombres_fluidos_es else 0
-    fluido_sel_es = st.selectbox("Fluido:", nombres_fluidos_es, index=idx_default, disabled=es_custom)
-
-    # --- Temperatura y Presión (siempre visibles) ---
-    T_fluido = st.number_input("Temperatura [°C]", value=float(_sc_flu.get("T_fluido", T_DEFAULT_C)), step=1.0, format="%.1f")
-    P_fluido = st.number_input("Presión [bar]",     value=float(_sc_flu.get("P_fluido", P_ATM_BAR)),  step=0.01, format="%.4f")
-    st.caption(f"≡ {P_fluido * 100:.2f} kPa  |  {P_fluido * 14.5038:.3f} psi")
-
-    if not es_custom:
-        # --- Propiedades calculadas con CoolProp ---
-        nombre_en = fluidos_dict[fluido_sel_es]
-        rho, mu, cp_error = propiedades_coolprop(nombre_en, T_fluido, P_fluido)
-
-        if rho is not None:
-            densidad   = rho
-            viscosidad = mu
-            st.text_input("Densidad [kg/m³]",  value=f"{densidad:.4f}",   disabled=True)
-            st.text_input("Viscosidad [Pa·s]", value=f"{viscosidad:.6f}", disabled=True)
-        else:
-            st.warning(f"⚠️ {cp_error} — Ingresa las propiedades manualmente.")
-            densidad   = st.number_input("Densidad [kg/m³]",  value=1000.0, format="%.4f")
-            viscosidad = st.number_input("Viscosidad [Pa·s]", value=0.001,  format="%.6f")
+    # Resumen del fluido seleccionado
+    if es_custom:
+        resumen = f"Personalizado — ρ={densidad:.1f} kg/m³ | μ={viscosidad:.5f} Pa·s"
     else:
-        # --- Fluido personalizado: densidad y viscosidad editables ---
-        densidad   = st.number_input("Densidad [kg/m³]",  value=float(_sc_flu.get("densidad",   1000.0)), format="%.4f")
-        viscosidad = st.number_input("Viscosidad [Pa·s]", value=float(_sc_flu.get("viscosidad", 0.001)),  format="%.6f")
+        resumen = f"{fluido_sel_es} — {T_fluido:.1f}°C | {P_fluido:.4f} bar"
+    st.caption(resumen)
 
-    # --- Caudal y velocidad (comunes) ---
-    st.divider()
+    # Botón para abrir el selector de fluido
+    if st.button("🧪 Seleccionar fluido", use_container_width=True):
+        st.session_state.modal_fluido = True
+        st.rerun()
+
+    # --- Caudal y velocidad ---
     caudal = st.number_input("Caudal [m³/s]", value=float(_sc_flu.get("caudal", 0.015)), format="%.4f")
     st.caption(f"≈ {caudal * 3600:.2f} m³/h")
 
@@ -322,6 +317,78 @@ def abrir_modal_singularidades():
 if st.session_state.modal_singularidades:
     st.session_state.modal_singularidades = False
     abrir_modal_singularidades()
+
+
+# ── Modal de selección de fluido ──────────────────────────────────────────────
+@st.dialog("🧪 Seleccionar fluido")
+def abrir_modal_fluido():
+    es_custom = st.checkbox("Fluido personalizado",
+                            value=st.session_state.fluido_es_custom)
+
+    if not es_custom:
+        # Selector de fluido de la lista
+        idx_actual = nombres_fluidos_es.index(st.session_state.fluido_nombre_es)                      if st.session_state.fluido_nombre_es in nombres_fluidos_es else 0
+        fluido_sel = st.selectbox("Fluido:", nombres_fluidos_es, index=idx_actual)
+
+        # Condiciones T y P
+        c1, c2 = st.columns(2)
+        T_val = c1.number_input("Temperatura [°C]",
+                                value=float(st.session_state.fluido_T),
+                                step=1.0, format="%.1f")
+        P_val = c2.number_input("Presión [bar]",
+                                value=float(st.session_state.fluido_P),
+                                step=0.01, format="%.4f")
+        st.caption(f"≡ {P_val * 100:.2f} kPa  |  {P_val * 14.5038:.3f} psi")
+
+        # Calcular propiedades con CoolProp
+        nombre_en = fluidos_dict[fluido_sel]
+        rho, mu, cp_error = propiedades_coolprop(nombre_en, T_val, P_val)
+
+        if rho is not None:
+            st.text_input("Densidad [kg/m³]",  value=f"{rho:.4f}",  disabled=True)
+            st.text_input("Viscosidad [Pa·s]", value=f"{mu:.6f}",   disabled=True)
+        else:
+            st.warning(f"⚠️ {cp_error} — las propiedades no pudieron calcularse.")
+            rho = st.number_input("Densidad [kg/m³]",  value=float(st.session_state.fluido_densidad),  format="%.4f")
+            mu  = st.number_input("Viscosidad [Pa·s]", value=float(st.session_state.fluido_viscosidad), format="%.6f")
+
+        if st.button("✅ Confirmar", use_container_width=True, type="primary"):
+            st.session_state.fluido_es_custom  = False
+            st.session_state.fluido_nombre_es  = fluido_sel
+            st.session_state.fluido_T          = T_val
+            st.session_state.fluido_P          = P_val
+            st.session_state.fluido_densidad   = rho
+            st.session_state.fluido_viscosidad = mu
+            st.session_state.mostrar_aviso_desactualizado = (
+                st.session_state.resultado_perfil_bombas_indefinido is not None
+            )
+            st.rerun()
+
+    else:
+        # Fluido personalizado
+        st.caption("Ingresa manualmente las propiedades del fluido.")
+        c1, c2 = st.columns(2)
+        T_val  = c1.number_input("Temperatura [°C]",  value=float(st.session_state.fluido_T),  step=1.0, format="%.1f")
+        P_val  = c2.number_input("Presión [bar]",      value=float(st.session_state.fluido_P),  step=0.01, format="%.4f")
+        st.caption(f"≡ {P_val * 100:.2f} kPa  |  {P_val * 14.5038:.3f} psi")
+        rho    = st.number_input("Densidad [kg/m³]",   value=float(st.session_state.fluido_densidad),   format="%.4f")
+        mu     = st.number_input("Viscosidad [Pa·s]",  value=float(st.session_state.fluido_viscosidad),  format="%.6f")
+
+        if st.button("✅ Confirmar", use_container_width=True, type="primary"):
+            st.session_state.fluido_es_custom  = True
+            st.session_state.fluido_nombre_es  = OPCION_CUSTOM
+            st.session_state.fluido_T          = T_val
+            st.session_state.fluido_P          = P_val
+            st.session_state.fluido_densidad   = rho
+            st.session_state.fluido_viscosidad = mu
+            st.session_state.mostrar_aviso_desactualizado = (
+                st.session_state.resultado_perfil_bombas_indefinido is not None
+            )
+            st.rerun()
+
+if st.session_state.modal_fluido:
+    st.session_state.modal_fluido = False
+    abrir_modal_fluido()
 
 
 # ── Snapshot de parámetros actuales ──────────────────────────────────────────
