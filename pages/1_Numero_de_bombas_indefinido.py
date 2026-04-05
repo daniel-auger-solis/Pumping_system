@@ -4,6 +4,8 @@ import numpy as np
 import altair as alt
 import os
 import json
+import base64
+import io
 from src.fluido import generar_perfil_con_bombas_automaticas
 from app.config_streamlit import configurar_app
 
@@ -87,9 +89,15 @@ for key, val in [
     ("singularidades",                     []),
     ("modal_singularidades",               False),
     ("editando_sing_idx",                  None),
+    ("sesion_cargada",                     None),
 ]:
     if key not in st.session_state:
         st.session_state[key] = val
+
+# Atajos para usar como defaults en widgets
+_sc       = st.session_state.sesion_cargada or {}
+_sc_cond  = _sc.get("condiciones", {})
+_sc_flu   = _sc.get("fluido", {})
 
 
 # ── UI ────────────────────────────────────────────────────────────────────────
@@ -193,8 +201,8 @@ with col2:
     fluido_sel_es = st.selectbox("Fluido:", nombres_fluidos_es, index=idx_default, disabled=es_custom)
 
     # --- Temperatura y Presión (siempre visibles) ---
-    T_fluido = st.number_input("Temperatura [°C]", value=T_DEFAULT_C, step=1.0, format="%.1f")
-    P_fluido = st.number_input("Presión [bar]", value=P_ATM_BAR, step=0.01, format="%.4f")
+    T_fluido = st.number_input("Temperatura [°C]", value=float(_sc_flu.get("T_fluido", T_DEFAULT_C)), step=1.0, format="%.1f")
+    P_fluido = st.number_input("Presión [bar]",     value=float(_sc_flu.get("P_fluido", P_ATM_BAR)),  step=0.01, format="%.4f")
     st.caption(f"≡ {P_fluido * 100:.2f} kPa  |  {P_fluido * 14.5038:.3f} psi")
 
     if not es_custom:
@@ -213,12 +221,12 @@ with col2:
             viscosidad = st.number_input("Viscosidad [Pa·s]", value=0.001,  format="%.6f")
     else:
         # --- Fluido personalizado: densidad y viscosidad editables ---
-        densidad   = st.number_input("Densidad [kg/m³]",  value=1000.0, format="%.4f")
-        viscosidad = st.number_input("Viscosidad [Pa·s]", value=0.001,  format="%.6f")
+        densidad   = st.number_input("Densidad [kg/m³]",  value=float(_sc_flu.get("densidad",   1000.0)), format="%.4f")
+        viscosidad = st.number_input("Viscosidad [Pa·s]", value=float(_sc_flu.get("viscosidad", 0.001)),  format="%.6f")
 
     # --- Caudal y velocidad (comunes) ---
     st.divider()
-    caudal = st.number_input("Caudal [m³/s]", value=0.015, format="%.4f")
+    caudal = st.number_input("Caudal [m³/s]", value=float(_sc_flu.get("caudal", 0.015)), format="%.4f")
     st.caption(f"≈ {caudal * 3600:.2f} m³/h")
 
     area      = np.pi * (diametro ** 2) / 4
@@ -229,10 +237,10 @@ with col2:
 # ── Columna 4: condiciones iniciales ─────────────────────────────────────────
 with col4:
     st.subheader("Condiciones iniciales")
-    presion_inicial_m = st.number_input("Presión inicial [m]",         value=10.0, step=1.0)
-    altura_seguridad  = st.number_input("Altura de seguridad [m]",      value=3.0,  step=1.0)
-    head_bomba        = st.number_input("Head de bomba [m]",            value=5.0,  step=1.0)
-    num_puntos_extra  = st.number_input("Puntos extra (interpolación)", min_value=0, value=0)
+    presion_inicial_m = st.number_input("Presión inicial [m]",         value=float(_sc_cond.get("presion_inicial_m", 10.0)), step=1.0)
+    altura_seguridad  = st.number_input("Altura de seguridad [m]",      value=float(_sc_cond.get("altura_seguridad",  3.0)),  step=1.0)
+    head_bomba        = st.number_input("Head de bomba [m]",            value=float(_sc_cond.get("head_bomba",        5.0)),  step=1.0)
+    num_puntos_extra  = st.number_input("Puntos extra (interpolación)", min_value=0, value=int(_sc_cond.get("num_puntos_extra", 0)))
 
     st.write("")
     n_sing    = len(st.session_state.singularidades)
@@ -313,6 +321,10 @@ if st.session_state.modal_singularidades:
     abrir_modal_singularidades()
 
 
+# Limpiar sesion_cargada una vez que los widgets la consumieron
+if st.session_state.sesion_cargada is not None:
+    st.session_state.sesion_cargada = None
+
 # ── Snapshot de parámetros actuales ──────────────────────────────────────────
 params_actuales = {
     "archivo":           P_geo_csv,
@@ -338,6 +350,73 @@ if (
 
 if st.session_state.mostrar_aviso_desactualizado:
     st.info("🔄 Los parámetros han cambiado. Presiona **Calcular perfil hidráulico** para actualizar los resultados.")
+
+# ── Guardar / Cargar sesión ───────────────────────────────────────────────────
+col_guardar, col_cargar = st.columns(2)
+
+with col_guardar:
+    # Construir el JSON de sesión con todos los parámetros actuales
+    sesion_export = {
+        "archivo_csv":       os.path.basename(P_geo_csv) if P_geo_csv else None,
+        "fluido": {
+            "es_custom":   es_custom,
+            "fluido_nombre": fluido_sel_es if not es_custom else OPCION_CUSTOM,
+            "T_fluido":    T_fluido,
+            "P_fluido":    P_fluido,
+            "densidad":    densidad,
+            "viscosidad":  viscosidad,
+        },
+        "tuberia": {
+            "material":    nombre_mat,
+            "dn_mm":       dn_seleccionado if materiales_disponibles else None,
+            "schedule_pn": (pn_seleccionado if tipo_mat == "pn"
+                            else (schedule_seleccionado if tipo_mat == "schedule" else None)),
+            "diametro_m":  diametro,
+            "rugosidad_m": rugosidad,
+        },
+        "condiciones": {
+            "presion_inicial_m": presion_inicial_m,
+            "altura_seguridad":  altura_seguridad,
+            "head_bomba":        head_bomba,
+            "num_puntos_extra":  num_puntos_extra,
+        },
+        "singularidades": st.session_state.singularidades,
+    }
+    json_bytes  = json.dumps(sesion_export, ensure_ascii=False, indent=2).encode("utf-8")
+    b64_content = base64.b64encode(json_bytes).decode()
+    href = (
+        f'<a href="data:application/json;base64,{b64_content}" '
+        f'download="sesion_hidraulica.json" '
+        f'style="display:inline-block;width:100%;text-align:center;'
+        f'padding:0.45rem 0;border:1px solid #ccc;border-radius:6px;'
+        f'text-decoration:none;color:inherit;font-size:0.9rem;">'
+        f'💾 Guardar sesión</a>'
+    )
+    st.markdown(href, unsafe_allow_html=True)
+
+with col_cargar:
+    archivo_sesion = st.file_uploader(
+        "📂 Cargar sesión", type=["json"],
+        label_visibility="collapsed",
+        key="uploader_sesion",
+    )
+    if archivo_sesion is not None:
+        try:
+            datos = json.load(io.TextIOWrapper(archivo_sesion, encoding="utf-8"))
+
+            # Cargar singularidades
+            if "singularidades" in datos:
+                st.session_state.singularidades = datos["singularidades"]
+
+            # Guardar datos para pre-rellenar widgets en el próximo rerun
+            st.session_state["sesion_cargada"] = datos
+            st.session_state.mostrar_aviso_desactualizado = (
+                st.session_state.resultado_perfil_bombas_indefinido is not None
+            )
+            st.success("✅ Sesión cargada. Revisa los parámetros y recalcula.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error al cargar la sesión: {e}")
 
 # ── Botón de cálculo ──────────────────────────────────────────────────────────
 boton_presionado = st.button("🚀 Calcular perfil hidráulico")
@@ -484,11 +563,14 @@ if st.session_state.resultado_perfil_bombas_indefinido:
 
             if tri_rows:
                 df_tri = pd.DataFrame(tri_rows)
+                # yOffset in pixels: triangle-down size=200 → marker height ≈ 12px.
+                # Altair supports yOffset directly on mark_point as a pixel shift.
                 puntos_sing = alt.Chart(df_tri).mark_point(
                     shape="triangle-down",
-                    size=150,
+                    size=200,
                     filled=True,
                     opacity=1.0,
+                    yOffset=-8,   # shift up so tip of triangle touches the HGL line
                 ).encode(
                     x=alt.X("x:Q"),
                     y=alt.Y("h:Q", scale=alt.Scale(zero=False)),
