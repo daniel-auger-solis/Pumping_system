@@ -7,37 +7,75 @@ import json
 from src.fluido import generar_perfil_con_bombas_automaticas
 from app.config_streamlit import configurar_app
 
+try:
+    import CoolProp.CoolProp as CP
+    COOLPROP_OK = True
+except ImportError:
+    COOLPROP_OK = False
+
 configurar_app()
 
-BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+BASE_DIR        = os.path.dirname(os.path.dirname(__file__))
 PATH_GEOGRAFICO = os.path.join(BASE_DIR, "data", "geografico")
 PATH_MATERIALES = os.path.join(BASE_DIR, "data", "material")
+PATH_FLUIDOS    = os.path.join(BASE_DIR, "data", "fluidos.json")
 
 os.makedirs(PATH_GEOGRAFICO, exist_ok=True)
 os.makedirs(PATH_MATERIALES, exist_ok=True)
 
-ACERO_NOMBRE = "Acero al Carbono ANSI B36.10 / B36.19"
+ACERO_NOMBRE     = "Acero al Carbono ANSI B36.10 / B36.19"
 DN_DEFAULT_ACERO = 150
 DN_DEFAULT_HDPE  = 140
+OPCION_CUSTOM    = "— Fluido personalizado —"
+FLUIDO_DEFAULT   = "Agua"
+P_ATM_BAR        = 1.01325
+T_DEFAULT_C      = 25.0
 
-# --- Funciones auxiliares ---
+
+# ── Funciones auxiliares ──────────────────────────────────────────────────────
 def listar_materiales():
     archivos = [f for f in os.listdir(PATH_MATERIALES) if f.endswith(".json")]
-    materiales_dict = {}
+    resultado = {}
     for arc in archivos:
         with open(os.path.join(PATH_MATERIALES, arc), "r", encoding="utf-8") as f:
             datos = json.load(f)
-            materiales_dict[datos["material"]] = datos
-    return materiales_dict
+            resultado[datos["material"]] = datos
+    return resultado
+
 
 def detectar_tipo_material(modelos: list) -> str:
-    if modelos and "pn" in modelos[0]:
-        return "pn"
-    return "schedule"
+    return "pn" if (modelos and "pn" in modelos[0]) else "schedule"
 
+
+def cargar_fluidos() -> dict:
+    """Devuelve {nombre_es: nombre_en} para CoolProp."""
+    if not os.path.exists(PATH_FLUIDOS):
+        return {"Agua": "Water"}
+    with open(PATH_FLUIDOS, "r", encoding="utf-8") as f:
+        lista = json.load(f)
+    return {item["name_es"]: item["name_en"] for item in lista}
+
+
+def propiedades_coolprop(nombre_en: str, T_C: float, P_bar: float):
+    """Retorna (densidad kg/m³, viscosidad Pa·s) o (None, None) si falla."""
+    if not COOLPROP_OK:
+        return None, None
+    try:
+        T_K  = T_C + 273.15
+        P_Pa = P_bar * 1e5
+        rho  = CP.PropsSI("D", "T", T_K, "P", P_Pa, nombre_en)
+        mu   = CP.PropsSI("V", "T", T_K, "P", P_Pa, nombre_en)
+        return rho, mu
+    except Exception:
+        return None, None
+
+
+# ── Datos globales ────────────────────────────────────────────────────────────
 materiales_disponibles = listar_materiales()
+fluidos_dict           = cargar_fluidos()           # {es: en}
+nombres_fluidos_es     = sorted(fluidos_dict.keys())
 
-# --- Inicializar session_state ---
+# ── Inicializar session_state ─────────────────────────────────────────────────
 for key, val in [
     ("resultado_perfil_bombas_indefinido", None),
     ("params_ultimo_calculo",              None),
@@ -48,11 +86,12 @@ for key, val in [
     if key not in st.session_state:
         st.session_state[key] = val
 
+
 # ── UI ────────────────────────────────────────────────────────────────────────
 st.title("📈 Número de bombas indefinido")
 st.write("""
 Este módulo permite generar el **perfil hidráulico** correspondiente al transporte de un fluido
-a lo largo del **perfil geográfico** que se adjunta en formato CSV.  
+a lo largo del **perfil geográfico** que se adjunta en formato CSV.
 A partir de los datos del terreno y los parámetros hidráulicos definidos, el sistema calcula
 las **pérdidas de carga** y determina la ubicación de cada **bomba** necesaria para mantener
 la presión adecuada en todo el trayecto.
@@ -60,6 +99,7 @@ la presión adecuada en todo el trayecto.
 
 st.header("Parámetros")
 col1, col2, col3, col4 = st.columns(4, border=True)
+
 
 # ── Columna 1: archivo CSV ────────────────────────────────────────────────────
 with col1:
@@ -82,15 +122,16 @@ with col1:
                 f.write(archivo.getbuffer())
             st.success("Cargado en /geografico")
 
+
 # ── Columna 3: tubería ────────────────────────────────────────────────────────
 with col3:
     st.subheader("Tubería")
 
-    diametro    = 0.1
-    rugosidad   = 0.0002
+    diametro        = 0.1
+    rugosidad       = 0.0002
     pn_seleccionado = None
-    tipo_mat    = "pn"
-    nombre_mat  = ""
+    tipo_mat        = "pn"
+    nombre_mat      = ""
 
     if materiales_disponibles:
         nombres_materiales = list(materiales_disponibles.keys())
@@ -101,18 +142,8 @@ with col3:
         tipo_mat = detectar_tipo_material(modelos)
 
         diametros_unicos = sorted(set(m["dn_mm"] for m in modelos))
-
-        # DN por defecto según material
-        if nombre_mat == ACERO_NOMBRE:
-            dn_def = DN_DEFAULT_ACERO
-        else:
-            dn_def = DN_DEFAULT_HDPE
-
-        indice_default = (
-            diametros_unicos.index(dn_def)
-            if dn_def in diametros_unicos
-            else 0
-        )
+        dn_def = DN_DEFAULT_ACERO if nombre_mat == ACERO_NOMBRE else DN_DEFAULT_HDPE
+        indice_default = diametros_unicos.index(dn_def) if dn_def in diametros_unicos else 0
 
         dn_seleccionado = st.selectbox("DN [mm]:", diametros_unicos, index=indice_default)
         modelos_dn = [m for m in modelos if m["dn_mm"] == dn_seleccionado]
@@ -128,11 +159,9 @@ with col3:
                 "Sch 80s", "XS", "Sch 80", "Sch 100",
                 "Sch 120", "Sch 140", "Sch 160", "XXS",
             ]
-            schedules_disponibles = [
-                s for s in orden_sch if any(m["schedule"] == s for m in modelos_dn)
-            ]
+            schedules_disponibles = [s for s in orden_sch if any(m["schedule"] == s for m in modelos_dn)]
             schedule_seleccionado = st.selectbox("Schedule:", schedules_disponibles)
-            modelo_final = next(m for m in modelos_dn if m["schedule"] == schedule_seleccionado)
+            modelo_final    = next(m for m in modelos_dn if m["schedule"] == schedule_seleccionado)
             pn_seleccionado = None
 
         diametro  = modelo_final["diametro_interno_mm"] / 1000.0
@@ -146,32 +175,71 @@ with col3:
     else:
         st.error("No hay archivos de materiales en /data/materiales")
 
+
 # ── Columna 2: fluido ─────────────────────────────────────────────────────────
 with col2:
     st.subheader("Fluido")
-    densidad   = st.number_input("Densidad [kg/m³]", value=1000.0)
-    viscosidad = st.number_input("Viscosidad [Pa·s]", value=0.001, format="%.3f")
-    caudal     = st.number_input("Caudal [m³/s]", value=0.015, format="%.4f")
+
+    # --- Selector de fluido ---
+    opciones_lista = nombres_fluidos_es + [OPCION_CUSTOM]
+    idx_default    = opciones_lista.index(FLUIDO_DEFAULT) if FLUIDO_DEFAULT in opciones_lista else 0
+    fluido_sel_es  = st.selectbox("Fluido:", opciones_lista, index=idx_default)
+    es_custom      = (fluido_sel_es == OPCION_CUSTOM)
+
+    if not es_custom:
+        # --- Condiciones T y P ---
+        T_fluido = st.number_input("Temperatura [°C]", value=T_DEFAULT_C, step=1.0, format="%.1f")
+        P_fluido = st.number_input("Presión [bar]", value=P_ATM_BAR, step=0.01, format="%.4f")
+        st.caption(f"≡ {P_fluido * 100:.2f} kPa  |  {P_fluido * 14.5038:.3f} psi")
+
+        # --- Calcular propiedades con CoolProp ---
+        nombre_en = fluidos_dict[fluido_sel_es]
+        rho, mu   = propiedades_coolprop(nombre_en, T_fluido, P_fluido)
+
+        if rho is not None:
+            densidad   = rho
+            viscosidad = mu
+            st.text_input("Densidad [kg/m³]",  value=f"{densidad:.4f}",   disabled=True)
+            st.text_input("Viscosidad [Pa·s]", value=f"{viscosidad:.6f}", disabled=True)
+        else:
+            # Fallback si CoolProp no está instalado o falla
+            st.warning("⚠️ CoolProp no disponible. Ingresa las propiedades manualmente.")
+            densidad   = st.number_input("Densidad [kg/m³]",  value=1000.0)
+            viscosidad = st.number_input("Viscosidad [Pa·s]", value=0.001, format="%.6f")
+    else:
+        # --- Fluido personalizado: campos manuales ---
+        st.caption("Ingresa las propiedades del fluido manualmente.")
+        T_fluido   = st.number_input("Temperatura [°C]",   value=T_DEFAULT_C, step=1.0, format="%.1f")
+        P_fluido   = st.number_input("Presión [bar]",       value=P_ATM_BAR,  step=0.01, format="%.4f")
+        st.caption(f"≡ {P_fluido * 100:.2f} kPa  |  {P_fluido * 14.5038:.3f} psi")
+        densidad   = st.number_input("Densidad [kg/m³]",   value=1000.0, format="%.4f")
+        viscosidad = st.number_input("Viscosidad [Pa·s]",  value=0.001,  format="%.6f")
+
+    # --- Caudal y velocidad (comunes) ---
+    st.divider()
+    caudal = st.number_input("Caudal [m³/s]", value=0.015, format="%.4f")
     st.caption(f"≈ {caudal * 3600:.2f} m³/h")
 
     area      = np.pi * (diametro ** 2) / 4
     velocidad = caudal / area if diametro > 0 else 0.0
     st.text_input("Velocidad Resultante [m/s]", value=f"{velocidad:.3f}", disabled=True)
 
+
 # ── Columna 4: condiciones iniciales ─────────────────────────────────────────
 with col4:
     st.subheader("Condiciones iniciales")
-    presion_inicial_m = st.number_input("Presión inicial [m]",          value=10.0, step=1.0)
-    altura_seguridad  = st.number_input("Altura de seguridad [m]",       value=3.0,  step=1.0)
-    head_bomba        = st.number_input("Head de bomba [m]",             value=5.0,  step=1.0)
-    num_puntos_extra  = st.number_input("Puntos extra (interpolación)",  min_value=0, value=0)
+    presion_inicial_m = st.number_input("Presión inicial [m]",         value=10.0, step=1.0)
+    altura_seguridad  = st.number_input("Altura de seguridad [m]",      value=3.0,  step=1.0)
+    head_bomba        = st.number_input("Head de bomba [m]",            value=5.0,  step=1.0)
+    num_puntos_extra  = st.number_input("Puntos extra (interpolación)", min_value=0, value=0)
 
     st.write("")
-    n_sing = len(st.session_state.singularidades)
+    n_sing    = len(st.session_state.singularidades)
     label_btn = f"⚙️ Singularidades ({n_sing})" if n_sing > 0 else "⚙️ Agregar singularidades"
     if st.button(label_btn, use_container_width=True):
         st.session_state.modal_singularidades = True
         st.rerun()
+
 
 # ── Modal de singularidades ───────────────────────────────────────────────────
 @st.dialog("⚙️ Singularidades del sistema")
@@ -179,16 +247,15 @@ def abrir_modal_singularidades():
     st.caption("Ingresá cada singularidad con su posición en el eje X del perfil y su coeficiente K.")
 
     with st.form("form_singularidad", clear_on_submit=True):
-        c1, c2 = st.columns(2)
-        x_sing    = c1.number_input("Posición X [m]", min_value=0.0, step=1.0, format="%.1f")
+        c1, c2    = st.columns(2)
+        x_sing    = c1.number_input("Posición X [m]",   min_value=0.0, step=1.0,  format="%.1f")
         k_sing    = c2.number_input("Coeficiente K [-]", min_value=0.0, step=0.1, format="%.2f")
         desc_sing = st.text_input("Descripción (opcional)", placeholder="Ej: Válvula de compuerta")
         agregar   = st.form_submit_button("➕ Agregar", use_container_width=True)
 
     if agregar:
         st.session_state.singularidades.append({
-            "x_m":         x_sing,
-            "k":           k_sing,
+            "x_m": x_sing, "k": k_sing,
             "descripcion": desc_sing.strip() or "—",
         })
         st.rerun()
@@ -211,21 +278,21 @@ if st.session_state.modal_singularidades:
     st.session_state.modal_singularidades = False
     abrir_modal_singularidades()
 
+
 # ── Snapshot de parámetros actuales ──────────────────────────────────────────
 params_actuales = {
-    "archivo":          P_geo_csv,
-    "densidad":         densidad,
-    "viscosidad":       viscosidad,
-    "caudal":           caudal,
-    "diametro":         diametro,
-    "rugosidad":        rugosidad,
+    "archivo":           P_geo_csv,
+    "densidad":          densidad,
+    "viscosidad":        viscosidad,
+    "caudal":            caudal,
+    "diametro":          diametro,
+    "rugosidad":         rugosidad,
     "presion_inicial_m": presion_inicial_m,
-    "altura_seguridad": altura_seguridad,
-    "head_bomba":       head_bomba,
-    "num_puntos_extra": num_puntos_extra,
+    "altura_seguridad":  altura_seguridad,
+    "head_bomba":        head_bomba,
+    "num_puntos_extra":  num_puntos_extra,
 }
 
-# Detectar cambio de parámetros y encender el flag (nunca apagarlo aquí)
 hay_resultado = st.session_state.resultado_perfil_bombas_indefinido is not None
 if (
     hay_resultado
@@ -234,7 +301,6 @@ if (
 ):
     st.session_state.mostrar_aviso_desactualizado = True
 
-# ── Aviso de parámetros cambiados (antes del botón) ──────────────────────────
 if st.session_state.mostrar_aviso_desactualizado:
     st.info("🔄 Los parámetros han cambiado. Presiona **Calcular perfil hidráulico** para actualizar los resultados.")
 
@@ -245,11 +311,11 @@ if boton_presionado:
     if not P_geo_csv:
         st.warning("⚠️ Debes seleccionar o subir un perfil geográfico CSV antes de calcular.")
     else:
-        fluido  = {"densidad": densidad, "viscosidad": viscosidad, "velocidad": velocidad}
-        tuberia = {"diametro": diametro, "rugosidad": rugosidad}
+        fluido_calc  = {"densidad": densidad, "viscosidad": viscosidad, "velocidad": velocidad}
+        tuberia_calc = {"diametro": diametro, "rugosidad": rugosidad}
 
         x_final, h_final, bombas = generar_perfil_con_bombas_automaticas(
-            P_geo_csv, fluido, tuberia,
+            P_geo_csv, fluido_calc, tuberia_calc,
             presion_inicial_m, altura_seguridad, head_bomba,
             num_puntos_extra=num_puntos_extra if num_puntos_extra > 0 else None,
         )
@@ -273,9 +339,9 @@ if boton_presionado:
                 "tipo_mat": tipo_mat,
             }
             st.session_state.params_ultimo_calculo        = params_actuales.copy()
-            # Apagar el aviso ahora que el cálculo está fresco
             st.session_state.mostrar_aviso_desactualizado = False
             st.success(f"✅ Cálculo completado. Se agregaron {len(bombas)} bombas.")
+
 
 # ── Visualización de Resultados ───────────────────────────────────────────────
 if st.session_state.resultado_perfil_bombas_indefinido:
@@ -295,7 +361,6 @@ if st.session_state.resultado_perfil_bombas_indefinido:
     with col_graf:
         st.subheader(f"📈 Perfil Hidráulico: {res['material']}")
 
-        # Aviso encima del gráfico (mismo flag)
         if st.session_state.mostrar_aviso_desactualizado:
             st.warning("🔄 Estás viendo resultados desactualizados — presiona **Calcular perfil hidráulico** para actualizar.")
 
@@ -304,29 +369,73 @@ if st.session_state.resultado_perfil_bombas_indefinido:
 
         tiene_pn = res["tipo_mat"] == "pn" and res["pn_bar"] is not None
 
-        terreno = (
-            alt.Chart(df_terr).mark_area(color="saddlebrown", opacity=0.3).encode(x="x", y="z")
-            + alt.Chart(df_terr).mark_line(color="saddlebrown", size=2).encode(x="x", y="z")
+        # ── Capas del gráfico con leyenda ─────────────────────────────────────
+        # Terreno: área + línea (sin leyenda, es el fondo visual)
+        terreno_area = alt.Chart(df_terr).mark_area(
+            color="saddlebrown", opacity=0.25
+        ).encode(
+            x=alt.X("x", title="Distancia Horizontal [m]"),
+            y=alt.Y("z", title="Elevación [msnm]", scale=alt.Scale(zero=False)),
         )
-        capas = [terreno]
+        df_terr_leg = df_terr.copy()
+        df_terr_leg["serie"] = "Terreno"
+        terreno_linea = alt.Chart(df_terr_leg).mark_line(size=2).encode(
+            x="x",
+            y=alt.Y("z", scale=alt.Scale(zero=False)),
+            color=alt.Color(
+                "serie:N",
+                scale=alt.Scale(
+                    domain=["Terreno"],
+                    range=["saddlebrown"],
+                ),
+                legend=alt.Legend(title="Referencias"),
+            ),
+        )
 
+        capas = [terreno_area, terreno_linea]
+
+        # MOP (si aplica)
         if tiene_pn:
             mca_max = res["pn_bar"] * 10.197
             df_terr["mop"] = df_terr["z"] + mca_max
-            linea_mop = alt.Chart(df_terr).mark_line(
-                strokeDash=[6, 4], color="red", opacity=0.6
-            ).encode(x="x", y="mop")
+            df_mop = df_terr[["x", "mop"]].copy()
+            df_mop["serie"] = f"MOP ({res['pn_bar']} bar)"
+            linea_mop = alt.Chart(df_mop).mark_line(
+                strokeDash=[6, 4], size=2
+            ).encode(
+                x="x",
+                y=alt.Y("mop:Q", scale=alt.Scale(zero=False)),
+                color=alt.Color(
+                    "serie:N",
+                    scale=alt.Scale(
+                        domain=[f"MOP ({res['pn_bar']} bar)"],
+                        range=["crimson"],
+                    ),
+                    legend=alt.Legend(title=None),
+                ),
+            )
             capas.append(linea_mop)
 
-        df_p = pd.DataFrame({"x": res["x_final"], "h": res["h_final"]})
-        linea_p = alt.Chart(df_p).mark_line(color="dodgerblue", size=2.5).encode(
-            x=alt.X("x", title="Distancia Horizontal [m]"),
-            y=alt.Y("h", title="Elevación [msnm]", scale=alt.Scale(zero=False)),
+        # Línea de presión hidráulica
+        df_p = pd.DataFrame({"x": res["x_final"], "h": res["h_final"], "serie": "Línea piezométrica"})
+        linea_p = alt.Chart(df_p).mark_line(size=2.5).encode(
+            x="x",
+            y=alt.Y("h:Q", scale=alt.Scale(zero=False)),
+            color=alt.Color(
+                "serie:N",
+                scale=alt.Scale(
+                    domain=["Línea piezométrica"],
+                    range=["dodgerblue"],
+                ),
+                legend=alt.Legend(title=None),
+            ),
         )
         capas.append(linea_p)
 
-        st.altair_chart(alt.layer(*capas).properties(height=400), use_container_width=True)
+        grafico = alt.layer(*capas).resolve_scale(color="independent").properties(height=400)
+        st.altair_chart(grafico, use_container_width=True)
 
+        # ── Validación MOP ────────────────────────────────────────────────────
         if tiene_pn:
             presion_max = max(res["h_final"])
             idx_max     = np.argmax(res["h_final"])
