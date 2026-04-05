@@ -7,14 +7,14 @@ import json
 from src.fluido import generar_perfil_con_bombas_automaticas
 from app.config_streamlit import configurar_app
 
+CP = None
+COOLPROP_OK = False
+COOLPROP_ERROR = ""
 try:
     import CoolProp.CoolProp as CP
-    # Verificar que CoolProp funciona correctamente haciendo una llamada de prueba
-    CP.PropsSI("D", "T", 298.15, "P", 101325, "Water")
     COOLPROP_OK = True
-except Exception:
-    CP = None
-    COOLPROP_OK = False
+except Exception as _e:
+    COOLPROP_ERROR = str(_e)
 
 configurar_app()
 
@@ -60,17 +60,18 @@ def cargar_fluidos() -> dict:
 
 
 def propiedades_coolprop(nombre_en: str, T_C: float, P_bar: float):
-    """Retorna (densidad kg/m³, viscosidad Pa·s) o (None, None) si falla."""
+    """Retorna (densidad kg/m³, viscosidad Pa·s, error_str) o (None, None, msg) si falla."""
     if not COOLPROP_OK:
-        return None, None
+        msg = f"CoolProp no disponible: {COOLPROP_ERROR}" if COOLPROP_ERROR else "CoolProp no instalado."
+        return None, None, msg
     try:
         T_K  = T_C + 273.15
         P_Pa = P_bar * 1e5
         rho  = CP.PropsSI("D", "T", T_K, "P", P_Pa, nombre_en)
         mu   = CP.PropsSI("V", "T", T_K, "P", P_Pa, nombre_en)
-        return rho, mu
-    except Exception:
-        return None, None
+        return rho, mu, None
+    except Exception as e:
+        return None, None, str(e)
 
 
 # ── Datos globales ────────────────────────────────────────────────────────────
@@ -183,21 +184,22 @@ with col3:
 with col2:
     st.subheader("Fluido")
 
-    # --- Selector de fluido ---
-    opciones_lista = nombres_fluidos_es + [OPCION_CUSTOM]
-    idx_default    = opciones_lista.index(FLUIDO_DEFAULT) if FLUIDO_DEFAULT in opciones_lista else 0
-    fluido_sel_es  = st.selectbox("Fluido:", opciones_lista, index=idx_default)
-    es_custom      = (fluido_sel_es == OPCION_CUSTOM)
+    # --- Checkbox fluido personalizado ---
+    es_custom = st.checkbox("Fluido personalizado")
+
+    # --- Selector de fluido (bloqueado si es custom) ---
+    idx_default   = nombres_fluidos_es.index(FLUIDO_DEFAULT) if FLUIDO_DEFAULT in nombres_fluidos_es else 0
+    fluido_sel_es = st.selectbox("Fluido:", nombres_fluidos_es, index=idx_default, disabled=es_custom)
+
+    # --- Temperatura y Presión (siempre visibles) ---
+    T_fluido = st.number_input("Temperatura [°C]", value=T_DEFAULT_C, step=1.0, format="%.1f")
+    P_fluido = st.number_input("Presión [bar]", value=P_ATM_BAR, step=0.01, format="%.4f")
+    st.caption(f"≡ {P_fluido * 100:.2f} kPa  |  {P_fluido * 14.5038:.3f} psi")
 
     if not es_custom:
-        # --- Condiciones T y P ---
-        T_fluido = st.number_input("Temperatura [°C]", value=T_DEFAULT_C, step=1.0, format="%.1f")
-        P_fluido = st.number_input("Presión [bar]", value=P_ATM_BAR, step=0.01, format="%.4f")
-        st.caption(f"≡ {P_fluido * 100:.2f} kPa  |  {P_fluido * 14.5038:.3f} psi")
-
-        # --- Calcular propiedades con CoolProp ---
+        # --- Propiedades calculadas con CoolProp ---
         nombre_en = fluidos_dict[fluido_sel_es]
-        rho, mu   = propiedades_coolprop(nombre_en, T_fluido, P_fluido)
+        rho, mu, cp_error = propiedades_coolprop(nombre_en, T_fluido, P_fluido)
 
         if rho is not None:
             densidad   = rho
@@ -205,18 +207,13 @@ with col2:
             st.text_input("Densidad [kg/m³]",  value=f"{densidad:.4f}",   disabled=True)
             st.text_input("Viscosidad [Pa·s]", value=f"{viscosidad:.6f}", disabled=True)
         else:
-            # Fallback si CoolProp no está instalado o falla
-            st.warning("⚠️ CoolProp no disponible. Ingresa las propiedades manualmente.")
-            densidad   = st.number_input("Densidad [kg/m³]",  value=1000.0)
-            viscosidad = st.number_input("Viscosidad [Pa·s]", value=0.001, format="%.6f")
+            st.warning(f"⚠️ {cp_error} — Ingresa las propiedades manualmente.")
+            densidad   = st.number_input("Densidad [kg/m³]",  value=1000.0, format="%.4f")
+            viscosidad = st.number_input("Viscosidad [Pa·s]", value=0.001,  format="%.6f")
     else:
-        # --- Fluido personalizado: campos manuales ---
-        st.caption("Ingresa las propiedades del fluido manualmente.")
-        T_fluido   = st.number_input("Temperatura [°C]",   value=T_DEFAULT_C, step=1.0, format="%.1f")
-        P_fluido   = st.number_input("Presión [bar]",       value=P_ATM_BAR,  step=0.01, format="%.4f")
-        st.caption(f"≡ {P_fluido * 100:.2f} kPa  |  {P_fluido * 14.5038:.3f} psi")
-        densidad   = st.number_input("Densidad [kg/m³]",   value=1000.0, format="%.4f")
-        viscosidad = st.number_input("Viscosidad [Pa·s]",  value=0.001,  format="%.6f")
+        # --- Fluido personalizado: densidad y viscosidad editables ---
+        densidad   = st.number_input("Densidad [kg/m³]",  value=1000.0, format="%.4f")
+        viscosidad = st.number_input("Viscosidad [Pa·s]", value=0.001,  format="%.6f")
 
     # --- Caudal y velocidad (comunes) ---
     st.divider()
