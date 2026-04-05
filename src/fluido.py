@@ -243,17 +243,20 @@ def generar_perfil_con_bombas_automaticas(
     # Pérdida singular por unidad (hf_k = K * v² / 2g); se multiplica por k en cada punto
     hf_v = (v ** 2) / (2 * G)
 
-    # Construir lookup de singularidades: {x_m: k_total}
-    # (si hay dos singularidades en el mismo X, se suman los K)
-    sing_lookup: dict[float, float] = {}
+    # Construir lookup de singularidades mapeando al índice del punto más cercano en x
+    # Esto resuelve el problema de coincidencia exacta de floats
+    sing_por_indice: dict[int, float] = {}
     for s in (singularidades or []):
-        xk = float(s["x_m"])
-        sing_lookup[xk] = sing_lookup.get(xk, 0.0) + float(s["k"])
+        x_m = float(s["x_m"])
+        k   = float(s["k"])
+        # Encontrar el índice del punto del perfil más cercano a x_m
+        idx_cercano = int(np.argmin([abs(xi - x_m) for xi in x]))
+        sing_por_indice[idx_cercano] = sing_por_indice.get(idx_cercano, 0.0) + k
 
     # Inicialización del recorrido
-    h_final  = [presion_inicial_m + z[0]]
-    x_final  = [x[0]]
-    bombas   = []
+    h_final = [presion_inicial_m + z[0]]
+    x_final = [x[0]]
+    bombas  = []
 
     # ── Primer punto ──────────────────────────────────────────────────────────
     h0 = presion_inicial_m + z[0]
@@ -274,18 +277,16 @@ def generar_perfil_con_bombas_automaticas(
         # Pérdida distribuida (Darcy-Weisbach)
         hf_dist = f * (L_real / D) * (v ** 2) / (2 * G)
 
-        # Pérdida singular en este punto (si existe)
-        hf_sing = sing_lookup.get(float(x[i]), 0.0) * hf_v
-
         h_nueva = h_final[-1] - hf_dist
         x_final.append(x[i])
         h_final.append(h_nueva)
 
-        # ── Aplicar singularidad (caída vertical hacia abajo) ─────────────────
-        if hf_sing > 0:
+        # ── Aplicar singularidad si corresponde a este índice ─────────────────
+        k_sing = sing_por_indice.get(i, 0.0)
+        if k_sing > 0:
+            hf_sing      = k_sing * hf_v
             h_antes_sing = h_nueva
             h_tras_sing  = h_antes_sing - hf_sing
-            # Insertar punto antes (misma X) para dibujar la caída vertical
             x_final.append(x[i])
             h_final.append(h_tras_sing)
             h_nueva = h_tras_sing
