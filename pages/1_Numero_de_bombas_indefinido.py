@@ -4,8 +4,6 @@ import numpy as np
 import altair as alt
 import os
 import json
-import base64
-import io
 from src.fluido import generar_perfil_con_bombas_automaticas
 from app.config_streamlit import configurar_app
 
@@ -89,15 +87,12 @@ for key, val in [
     ("singularidades",                     []),
     ("modal_singularidades",               False),
     ("editando_sing_idx",                  None),
-    ("sesion_cargada",                     None),
 ]:
     if key not in st.session_state:
         st.session_state[key] = val
 
-# Atajos para usar como defaults en widgets
-_sc       = st.session_state.sesion_cargada or {}
-_sc_cond  = _sc.get("condiciones", {})
-_sc_flu   = _sc.get("fluido", {})
+_sc_cond  = {}
+_sc_flu   = {}
 
 
 # ── UI ────────────────────────────────────────────────────────────────────────
@@ -321,10 +316,6 @@ if st.session_state.modal_singularidades:
     abrir_modal_singularidades()
 
 
-# Limpiar sesion_cargada una vez que los widgets la consumieron
-if st.session_state.sesion_cargada is not None:
-    st.session_state.sesion_cargada = None
-
 # ── Snapshot de parámetros actuales ──────────────────────────────────────────
 params_actuales = {
     "archivo":           P_geo_csv,
@@ -350,73 +341,6 @@ if (
 
 if st.session_state.mostrar_aviso_desactualizado:
     st.info("🔄 Los parámetros han cambiado. Presiona **Calcular perfil hidráulico** para actualizar los resultados.")
-
-# ── Guardar / Cargar sesión ───────────────────────────────────────────────────
-col_guardar, col_cargar = st.columns(2)
-
-with col_guardar:
-    # Construir el JSON de sesión con todos los parámetros actuales
-    sesion_export = {
-        "archivo_csv":       os.path.basename(P_geo_csv) if P_geo_csv else None,
-        "fluido": {
-            "es_custom":   es_custom,
-            "fluido_nombre": fluido_sel_es if not es_custom else OPCION_CUSTOM,
-            "T_fluido":    T_fluido,
-            "P_fluido":    P_fluido,
-            "densidad":    densidad,
-            "viscosidad":  viscosidad,
-        },
-        "tuberia": {
-            "material":    nombre_mat,
-            "dn_mm":       dn_seleccionado if materiales_disponibles else None,
-            "schedule_pn": (pn_seleccionado if tipo_mat == "pn"
-                            else (schedule_seleccionado if tipo_mat == "schedule" else None)),
-            "diametro_m":  diametro,
-            "rugosidad_m": rugosidad,
-        },
-        "condiciones": {
-            "presion_inicial_m": presion_inicial_m,
-            "altura_seguridad":  altura_seguridad,
-            "head_bomba":        head_bomba,
-            "num_puntos_extra":  num_puntos_extra,
-        },
-        "singularidades": st.session_state.singularidades,
-    }
-    json_bytes  = json.dumps(sesion_export, ensure_ascii=False, indent=2).encode("utf-8")
-    b64_content = base64.b64encode(json_bytes).decode()
-    href = (
-        f'<a href="data:application/json;base64,{b64_content}" '
-        f'download="sesion_hidraulica.json" '
-        f'style="display:inline-block;width:100%;text-align:center;'
-        f'padding:0.45rem 0;border:1px solid #ccc;border-radius:6px;'
-        f'text-decoration:none;color:inherit;font-size:0.9rem;">'
-        f'💾 Guardar sesión</a>'
-    )
-    st.markdown(href, unsafe_allow_html=True)
-
-with col_cargar:
-    archivo_sesion = st.file_uploader(
-        "📂 Cargar sesión", type=["json"],
-        label_visibility="collapsed",
-        key="uploader_sesion",
-    )
-    if archivo_sesion is not None:
-        try:
-            datos = json.load(io.TextIOWrapper(archivo_sesion, encoding="utf-8"))
-
-            # Cargar singularidades
-            if "singularidades" in datos:
-                st.session_state.singularidades = datos["singularidades"]
-
-            # Guardar datos para pre-rellenar widgets en el próximo rerun
-            st.session_state["sesion_cargada"] = datos
-            st.session_state.mostrar_aviso_desactualizado = (
-                st.session_state.resultado_perfil_bombas_indefinido is not None
-            )
-            st.success("✅ Sesión cargada. Revisa los parámetros y recalcula.")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error al cargar la sesión: {e}")
 
 # ── Botón de cálculo ──────────────────────────────────────────────────────────
 boton_presionado = st.button("🚀 Calcular perfil hidráulico")
