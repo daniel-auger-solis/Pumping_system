@@ -437,34 +437,28 @@ if st.session_state.resultado_perfil_bombas_indefinido:
         # ── Singularidades: segmentos verticales hacia abajo ──────────────────
         sings_res = res.get("singularidades", [])
         if sings_res:
-            # Para cada singularidad buscamos los dos puntos consecutivos con el mismo X
-            # que genera fluido.py (h_antes y h_tras). Los dibujamos como regla vertical naranja.
-            x_arr = res["x_final"]
-            h_arr = res["h_final"]
+            x_arr  = res["x_final"]
+            h_arr  = res["h_final"]
+            seg_id = 0
             seg_rows = []
-            for s in sings_res:
-                xs = float(s["x_m"])
-                # Encontrar índices donde x == xs (puede haber dos o tres: normal, antes, después)
-                idxs = [i for i, xv in enumerate(x_arr) if abs(xv - xs) < 1e-6]
-                if len(idxs) >= 2:
-                    # El par que baja es la caída singular: mayor h → menor h consecutivos
-                    for j in range(len(idxs) - 1):
-                        h_a = h_arr[idxs[j]]
-                        h_b = h_arr[idxs[j + 1]]
-                        if h_b < h_a:  # caída → singularidad
-                            seg_rows.append({"x": xs, "h": h_a, "serie": "Singularidad", "orden": 0})
-                            seg_rows.append({"x": xs, "h": h_b, "serie": "Singularidad", "orden": 1})
-                            seg_rows.append({"x": xs, "h": None, "serie": "Singularidad", "orden": 2})  # break
+
+            # Recorrer pares consecutivos buscando caídas en el mismo X
+            # fluido.py inserta [x_i, h_antes] → [x_i, h_tras] con h_tras < h_antes
+            for j in range(len(x_arr) - 1):
+                if abs(x_arr[j] - x_arr[j + 1]) < 1e-9:   # mismo X
+                    h_a, h_b = h_arr[j], h_arr[j + 1]
+                    if h_b < h_a:                           # caída → es singularidad
+                        seg_rows.append({"x": x_arr[j], "h": h_a, "seg": seg_id})
+                        seg_rows.append({"x": x_arr[j], "h": h_b, "seg": seg_id})
+                        seg_id += 1
 
             if seg_rows:
                 df_sing = pd.DataFrame(seg_rows)
-                df_sing = df_sing.dropna(subset=["h"])
-                linea_sing = alt.Chart(df_sing).mark_line(
-                    size=2.5, strokeDash=[4, 3]
-                ).encode(
-                    x="x:Q",
+                df_sing["serie"] = "Singularidad"
+                linea_sing = alt.Chart(df_sing).mark_line(size=2.5).encode(
+                    x=alt.X("x:Q"),
                     y=alt.Y("h:Q", scale=alt.Scale(zero=False)),
-                    detail="x:N",
+                    detail="seg:N",          # un trazo por cada segmento
                     color=alt.Color(
                         "serie:N",
                         scale=alt.Scale(domain=["Singularidad"], range=["darkorange"]),
