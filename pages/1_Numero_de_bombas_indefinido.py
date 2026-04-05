@@ -9,8 +9,11 @@ from app.config_streamlit import configurar_app
 
 try:
     import CoolProp.CoolProp as CP
+    # Verificar que CoolProp funciona correctamente haciendo una llamada de prueba
+    CP.PropsSI("D", "T", 298.15, "P", 101325, "Water")
     COOLPROP_OK = True
-except ImportError:
+except Exception:
+    CP = None
     COOLPROP_OK = False
 
 configurar_app()
