@@ -248,26 +248,58 @@ with col4:
 # ── Modal de singularidades ───────────────────────────────────────────────────
 @st.dialog("⚙️ Singularidades del sistema")
 def abrir_modal_singularidades():
+    # El índice de edición se lee en cada render del diálogo
     edit_idx = st.session_state.editando_sing_idx
 
-    # ── Formulario: agregar o editar ─────────────────────────────────────────
+    # ── Listado de singularidades (siempre visible arriba) ────────────────────
+    if st.session_state.singularidades:
+        st.markdown("**Singularidades cargadas:**")
+        for i, s in enumerate(st.session_state.singularidades):
+            col_info, col_edit, col_del = st.columns([5, 1, 1])
+            etiqueta = f"**#{i+1}** {'✏️' if i == edit_idx else ''} &nbsp; X = `{s['x_m']} m` &nbsp;|&nbsp; K = `{s['k']}` &nbsp;|&nbsp; {s['descripcion']}"
+            col_info.markdown(etiqueta)
+            if col_edit.button("✏️", key=f"edit_sing_{i}", help="Editar"):
+                st.session_state.editando_sing_idx = i
+                st.session_state.modal_singularidades = True  # reabre el diálogo tras el rerun
+                st.rerun()
+            if col_del.button("🗑️", key=f"del_sing_{i}", help="Eliminar"):
+                st.session_state.singularidades.pop(i)
+                if st.session_state.editando_sing_idx == i:
+                    st.session_state.editando_sing_idx = None
+                st.session_state.mostrar_aviso_desactualizado = (
+                    st.session_state.resultado_perfil_bombas_indefinido is not None
+                )
+                st.session_state.modal_singularidades = True  # reopen
+                st.rerun()
+    else:
+        st.info("No hay singularidades cargadas.")
+
+    st.divider()
+
+    # ── Formulario: agregar o editar ──────────────────────────────────────────
+    edit_idx = st.session_state.editando_sing_idx   # releer por si cambió arriba
     if edit_idx is None:
-        st.caption("Ingresá cada singularidad con su posición en el eje X del perfil y su coeficiente K.")
+        st.caption("Ingresá la posición X y el coeficiente K de la singularidad.")
         form_label = "➕ Agregar"
         x_def, k_def, desc_def = 0.0, 0.0, ""
     else:
         s_edit = st.session_state.singularidades[edit_idx]
         st.info(f"✏️ Editando singularidad #{edit_idx + 1}")
         form_label = "💾 Guardar cambios"
-        x_def, k_def, desc_def = float(s_edit["x_m"]), float(s_edit["k"]), s_edit["descripcion"]
+        x_def  = float(s_edit["x_m"])
+        k_def  = float(s_edit["k"])
+        desc_def = s_edit["descripcion"] if s_edit["descripcion"] != "—" else ""
 
     with st.form("form_singularidad", clear_on_submit=True):
         c1, c2    = st.columns(2)
-        x_sing    = c1.number_input("Posición X [m]",   min_value=0.0, step=1.0,  format="%.1f", value=x_def)
-        k_sing    = c2.number_input("Coeficiente K [-]", min_value=0.0, step=0.1, format="%.2f", value=k_def)
+        x_sing    = c1.number_input("Posición X [m]",    min_value=0.0, step=1.0,  format="%.1f", value=x_def)
+        k_sing    = c2.number_input("Coeficiente K [-]", min_value=0.0, step=0.1,  format="%.2f", value=k_def)
         desc_sing = st.text_input("Descripción (opcional)", value=desc_def,
                                   placeholder="Ej: Válvula de compuerta")
-        confirmar = st.form_submit_button(form_label, use_container_width=True)
+        col_btn1, col_btn2 = st.columns([3, 1])
+        confirmar = col_btn1.form_submit_button(form_label, use_container_width=True)
+        cancelar  = col_btn2.form_submit_button("✖️", use_container_width=True,
+                                                 disabled=(edit_idx is None))
 
     if confirmar:
         entrada = {"x_m": x_sing, "k": k_sing, "descripcion": desc_sing.strip() or "—"}
@@ -276,40 +308,16 @@ def abrir_modal_singularidades():
         else:
             st.session_state.singularidades[edit_idx] = entrada
             st.session_state.editando_sing_idx = None
-        # Marcar que los parámetros cambiaron para activar el aviso
         st.session_state.mostrar_aviso_desactualizado = (
             st.session_state.resultado_perfil_bombas_indefinido is not None
         )
+        st.session_state.modal_singularidades = True  # reopen after save
         st.rerun()
 
-    if edit_idx is not None:
-        if st.button("✖️ Cancelar edición", use_container_width=True):
-            st.session_state.editando_sing_idx = None
-            st.rerun()
-
-    # ── Listado de singularidades ─────────────────────────────────────────────
-    if st.session_state.singularidades:
-        st.divider()
-        st.markdown("**Singularidades cargadas:**")
-        for i, s in enumerate(st.session_state.singularidades):
-            col_info, col_edit, col_del = st.columns([5, 1, 1])
-            col_info.markdown(
-                f"**#{i+1}** &nbsp; X = `{s['x_m']} m` &nbsp;|&nbsp; K = `{s['k']}` &nbsp;|&nbsp; {s['descripcion']}"
-            )
-            if col_edit.button("✏️", key=f"edit_sing_{i}", help="Editar"):
-                st.session_state.editando_sing_idx = i
-                st.rerun()
-            if col_del.button("🗑️", key=f"del_sing_{i}", help="Eliminar"):
-                st.session_state.singularidades.pop(i)
-                if st.session_state.editando_sing_idx == i:
-                    st.session_state.editando_sing_idx = None
-                # Marcar parámetros cambiados
-                st.session_state.mostrar_aviso_desactualizado = (
-                    st.session_state.resultado_perfil_bombas_indefinido is not None
-                )
-                st.rerun()
-    else:
-        st.info("No hay singularidades cargadas.")
+    if cancelar:
+        st.session_state.editando_sing_idx = None
+        st.session_state.modal_singularidades = True  # reopen
+        st.rerun()
 
 if st.session_state.modal_singularidades:
     st.session_state.modal_singularidades = False
