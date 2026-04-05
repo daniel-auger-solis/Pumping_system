@@ -318,6 +318,7 @@ if boton_presionado:
             P_geo_csv, fluido_calc, tuberia_calc,
             presion_inicial_m, altura_seguridad, head_bomba,
             num_puntos_extra=num_puntos_extra if num_puntos_extra > 0 else None,
+            singularidades=st.session_state.singularidades,
         )
 
         if len(bombas) > 20:
@@ -330,13 +331,14 @@ if boton_presionado:
             )
         else:
             st.session_state.resultado_perfil_bombas_indefinido = {
-                "x_final":  x_final,
-                "h_final":  h_final,
-                "bombas":   bombas,
-                "archivo":  P_geo_csv,
-                "pn_bar":   pn_seleccionado,
-                "material": nombre_mat,
-                "tipo_mat": tipo_mat,
+                "x_final":        x_final,
+                "h_final":        h_final,
+                "bombas":         bombas,
+                "singularidades": list(st.session_state.singularidades),
+                "archivo":        P_geo_csv,
+                "pn_bar":         pn_seleccionado,
+                "material":       nombre_mat,
+                "tipo_mat":       tipo_mat,
             }
             st.session_state.params_ultimo_calculo        = params_actuales.copy()
             st.session_state.mostrar_aviso_desactualizado = False
@@ -431,6 +433,45 @@ if st.session_state.resultado_perfil_bombas_indefinido:
             ),
         )
         capas.append(linea_p)
+
+        # ── Singularidades: segmentos verticales hacia abajo ──────────────────
+        sings_res = res.get("singularidades", [])
+        if sings_res:
+            # Para cada singularidad buscamos los dos puntos consecutivos con el mismo X
+            # que genera fluido.py (h_antes y h_tras). Los dibujamos como regla vertical naranja.
+            x_arr = res["x_final"]
+            h_arr = res["h_final"]
+            seg_rows = []
+            for s in sings_res:
+                xs = float(s["x_m"])
+                # Encontrar índices donde x == xs (puede haber dos o tres: normal, antes, después)
+                idxs = [i for i, xv in enumerate(x_arr) if abs(xv - xs) < 1e-6]
+                if len(idxs) >= 2:
+                    # El par que baja es la caída singular: mayor h → menor h consecutivos
+                    for j in range(len(idxs) - 1):
+                        h_a = h_arr[idxs[j]]
+                        h_b = h_arr[idxs[j + 1]]
+                        if h_b < h_a:  # caída → singularidad
+                            seg_rows.append({"x": xs, "h": h_a, "serie": "Singularidad", "orden": 0})
+                            seg_rows.append({"x": xs, "h": h_b, "serie": "Singularidad", "orden": 1})
+                            seg_rows.append({"x": xs, "h": None, "serie": "Singularidad", "orden": 2})  # break
+
+            if seg_rows:
+                df_sing = pd.DataFrame(seg_rows)
+                df_sing = df_sing.dropna(subset=["h"])
+                linea_sing = alt.Chart(df_sing).mark_line(
+                    size=2.5, strokeDash=[4, 3]
+                ).encode(
+                    x="x:Q",
+                    y=alt.Y("h:Q", scale=alt.Scale(zero=False)),
+                    detail="x:N",
+                    color=alt.Color(
+                        "serie:N",
+                        scale=alt.Scale(domain=["Singularidad"], range=["darkorange"]),
+                        legend=alt.Legend(title=None),
+                    ),
+                )
+                capas.append(linea_sing)
 
         grafico = alt.layer(*capas).resolve_scale(color="independent").properties(height=400)
         st.altair_chart(grafico, use_container_width=True)
