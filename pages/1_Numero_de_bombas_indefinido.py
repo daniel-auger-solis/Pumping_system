@@ -86,6 +86,7 @@ for key, val in [
     ("mostrar_aviso_desactualizado",       False),
     ("singularidades",                     []),
     ("modal_singularidades",               False),
+    ("editando_sing_idx",                  None),
 ]:
     if key not in st.session_state:
         st.session_state[key] = val
@@ -244,32 +245,65 @@ with col4:
 # ── Modal de singularidades ───────────────────────────────────────────────────
 @st.dialog("⚙️ Singularidades del sistema")
 def abrir_modal_singularidades():
-    st.caption("Ingresá cada singularidad con su posición en el eje X del perfil y su coeficiente K.")
+    edit_idx = st.session_state.editando_sing_idx
+
+    # ── Formulario: agregar o editar ─────────────────────────────────────────
+    if edit_idx is None:
+        st.caption("Ingresá cada singularidad con su posición en el eje X del perfil y su coeficiente K.")
+        form_label = "➕ Agregar"
+        x_def, k_def, desc_def = 0.0, 0.0, ""
+    else:
+        s_edit = st.session_state.singularidades[edit_idx]
+        st.info(f"✏️ Editando singularidad #{edit_idx + 1}")
+        form_label = "💾 Guardar cambios"
+        x_def, k_def, desc_def = float(s_edit["x_m"]), float(s_edit["k"]), s_edit["descripcion"]
 
     with st.form("form_singularidad", clear_on_submit=True):
         c1, c2    = st.columns(2)
-        x_sing    = c1.number_input("Posición X [m]",   min_value=0.0, step=1.0,  format="%.1f")
-        k_sing    = c2.number_input("Coeficiente K [-]", min_value=0.0, step=0.1, format="%.2f")
-        desc_sing = st.text_input("Descripción (opcional)", placeholder="Ej: Válvula de compuerta")
-        agregar   = st.form_submit_button("➕ Agregar", use_container_width=True)
+        x_sing    = c1.number_input("Posición X [m]",   min_value=0.0, step=1.0,  format="%.1f", value=x_def)
+        k_sing    = c2.number_input("Coeficiente K [-]", min_value=0.0, step=0.1, format="%.2f", value=k_def)
+        desc_sing = st.text_input("Descripción (opcional)", value=desc_def,
+                                  placeholder="Ej: Válvula de compuerta")
+        confirmar = st.form_submit_button(form_label, use_container_width=True)
 
-    if agregar:
-        st.session_state.singularidades.append({
-            "x_m": x_sing, "k": k_sing,
-            "descripcion": desc_sing.strip() or "—",
-        })
+    if confirmar:
+        entrada = {"x_m": x_sing, "k": k_sing, "descripcion": desc_sing.strip() or "—"}
+        if edit_idx is None:
+            st.session_state.singularidades.append(entrada)
+        else:
+            st.session_state.singularidades[edit_idx] = entrada
+            st.session_state.editando_sing_idx = None
+        # Marcar que los parámetros cambiaron para activar el aviso
+        st.session_state.mostrar_aviso_desactualizado = (
+            st.session_state.resultado_perfil_bombas_indefinido is not None
+        )
         st.rerun()
 
+    if edit_idx is not None:
+        if st.button("✖️ Cancelar edición", use_container_width=True):
+            st.session_state.editando_sing_idx = None
+            st.rerun()
+
+    # ── Listado de singularidades ─────────────────────────────────────────────
     if st.session_state.singularidades:
         st.divider()
         st.markdown("**Singularidades cargadas:**")
         for i, s in enumerate(st.session_state.singularidades):
-            col_info, col_del = st.columns([5, 1])
+            col_info, col_edit, col_del = st.columns([5, 1, 1])
             col_info.markdown(
                 f"**#{i+1}** &nbsp; X = `{s['x_m']} m` &nbsp;|&nbsp; K = `{s['k']}` &nbsp;|&nbsp; {s['descripcion']}"
             )
-            if col_del.button("🗑️", key=f"del_sing_{i}"):
+            if col_edit.button("✏️", key=f"edit_sing_{i}", help="Editar"):
+                st.session_state.editando_sing_idx = i
+                st.rerun()
+            if col_del.button("🗑️", key=f"del_sing_{i}", help="Eliminar"):
                 st.session_state.singularidades.pop(i)
+                if st.session_state.editando_sing_idx == i:
+                    st.session_state.editando_sing_idx = None
+                # Marcar parámetros cambiados
+                st.session_state.mostrar_aviso_desactualizado = (
+                    st.session_state.resultado_perfil_bombas_indefinido is not None
+                )
                 st.rerun()
     else:
         st.info("No hay singularidades cargadas.")
@@ -291,6 +325,7 @@ params_actuales = {
     "altura_seguridad":  altura_seguridad,
     "head_bomba":        head_bomba,
     "num_puntos_extra":  num_puntos_extra,
+    "singularidades":    str(st.session_state.singularidades),
 }
 
 hay_resultado = st.session_state.resultado_perfil_bombas_indefinido is not None
@@ -434,38 +469,40 @@ if st.session_state.resultado_perfil_bombas_indefinido:
         )
         capas.append(linea_p)
 
-        # ── Singularidades: segmentos verticales hacia abajo ──────────────────
+        # ── Singularidades: triángulo amarillo en h_antes (punto más alto) ────
         sings_res = res.get("singularidades", [])
         if sings_res:
-            x_arr  = res["x_final"]
-            h_arr  = res["h_final"]
-            seg_id = 0
-            seg_rows = []
+            x_arr    = res["x_final"]
+            h_arr    = res["h_final"]
+            tri_rows = []
 
-            # Recorrer pares consecutivos buscando caídas en el mismo X
-            # fluido.py inserta [x_i, h_antes] → [x_i, h_tras] con h_tras < h_antes
             for j in range(len(x_arr) - 1):
                 if abs(x_arr[j] - x_arr[j + 1]) < 1e-9:   # mismo X
                     h_a, h_b = h_arr[j], h_arr[j + 1]
-                    if h_b < h_a:                           # caída → es singularidad
-                        seg_rows.append({"x": x_arr[j], "h": h_a, "seg": seg_id})
-                        seg_rows.append({"x": x_arr[j], "h": h_b, "seg": seg_id})
-                        seg_id += 1
+                    if h_b < h_a:                           # caída → singularidad
+                        tri_rows.append({"x": x_arr[j], "h": h_a, "serie": "Singularidad"})
 
-            if seg_rows:
-                df_sing = pd.DataFrame(seg_rows)
-                df_sing["serie"] = "Singularidad"
-                linea_sing = alt.Chart(df_sing).mark_line(size=2.5).encode(
+            if tri_rows:
+                df_tri = pd.DataFrame(tri_rows)
+                puntos_sing = alt.Chart(df_tri).mark_point(
+                    shape="triangle-down",
+                    size=150,
+                    filled=True,
+                    opacity=1.0,
+                ).encode(
                     x=alt.X("x:Q"),
                     y=alt.Y("h:Q", scale=alt.Scale(zero=False)),
-                    detail="seg:N",          # un trazo por cada segmento
                     color=alt.Color(
                         "serie:N",
-                        scale=alt.Scale(domain=["Singularidad"], range=["darkorange"]),
+                        scale=alt.Scale(domain=["Singularidad"], range=["gold"]),
                         legend=alt.Legend(title=None),
                     ),
+                    tooltip=[
+                        alt.Tooltip("x:Q", title="X [m]"),
+                        alt.Tooltip("h:Q", title="H [msnm]", format=".2f"),
+                    ],
                 )
-                capas.append(linea_sing)
+                capas.append(puntos_sing)
 
         grafico = alt.layer(*capas).resolve_scale(color="independent").properties(height=400)
         st.altair_chart(grafico, use_container_width=True)
